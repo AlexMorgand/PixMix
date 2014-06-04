@@ -38,7 +38,6 @@ class DR
 
     cv::Mat mask_;
     cv::Mat input_;
-    cv::Mat gray_;
     size_t nb_iter_;
     size_t iter_;
     size_t max_scale_;
