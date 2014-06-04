@@ -1,0 +1,214 @@
+
+
+
+
+int main()
+{
+
+// à appeler une fois :
+// Vecteur.
+orientation = cv::Mat::zeros(gray_image.size(), CV_8UC1);
+// Magnitude.
+amplitude = cv::Mat::zeros(gray_image.size(), CV_32FC1);
+// Sobel, 3x3.
+compute_gradient(gray_image, orientation, amplitude);
+
+
+// à appeler à chaque comparaison de 2 patchs
+float gradient_difference = compare_gradients(orientation, amplitude, tmp_mask1, tmp_mask2);
+
+
+float blueRatio = 0.0; float greenRatio = 0.0; float redRatio = 0.0;
+float blueGreenRatio = 0.0; float redGreenRatio = 0.0;
+compute_color_ratio(image, tmp_mask1, tmp_mask2, blueRatio, greenRatio, redRatio, blueGreenRatio, redGreenRatio);
+
+
+// Cost function.
+// FIXME: needed changes ?
+float tmp_ratio = abs( blueGreenRatios[indexes[p]] -1) + abs( redGreenRatios[indexes[p]] -1) + 5*abs( gradient_differences[indexes[p]]);
+
+}
+
+
+
+
+
+// 30° to have a significant classification and change.
+
+int Search::find_nearest_orientation(float XY)
+{
+	float orientation_diff[7] = {abs(XY-0.0), abs(XY-30.0), abs(XY-60.0), abs(XY-90.0), abs(XY-120.0), abs(XY-150.0), abs(XY-180.0)};
+	int iMin = 0;
+	float minValue = orientation_diff[0];	
+	for (int i = 0; i < 7; ++i)
+	{
+		if(orientation_diff[i]<minValue)
+		{
+			minValue = orientation_diff[i];
+			iMin = i;
+		}
+	}
+
+return iMin;
+}
+
+
+// FIXME: Use sobel opencv.
+void Search::compute_gradient(cv::Mat gray_image, cv::Mat& orientation, cv::Mat& amplitude)
+{
+	cv::Mat tmp_im = gray_image.clone();
+	float data[3][3] = {{1,0,-1},{2,0,-2},{1,0,-1}}; 
+	cv::Mat sobelX = cv::Mat(3, 3, CV_32FC1, &data);
+	cv::Mat sobelY = sobelX.t();
+
+	cv::Mat gradX;
+	cv::Mat gradY;
+
+	cv::filter2D(tmp_im, gradX, CV_32FC1, sobelX, cv::Point(-1,-1));
+	cv::filter2D(tmp_im, gradY, CV_32FC1, sobelY, cv::Point(-1,-1));
+
+	float XY = 0.0;
+    	float pi = 3.14159265359;
+
+	for (int i = 0; i < gray_image.size().height; ++i)
+	{
+		for (int j = 0; j < gray_image.size().width; ++j)
+		{
+			
+			if(gradY.at<float>(i,j) == 0)
+			{
+				if(gradX.at<float>(i,j) > 0)
+				{
+					XY = 90.0;
+				}
+				else if(gradX.at<float>(i,j) < 0)
+				{
+					XY = -90.0;
+				}
+				else if(gradX.at<float>(i,j) == 0)
+				{
+					XY = 0; // the no gradient case is not the same as the case : orientation is equal to 0; but to write this has no impact since the amplitude is equal to zero fot this case
+				}
+
+			}
+			else
+			{
+				XY = atan(gradX.at<float>(i,j)/gradY.at<float>(i,j));
+				XY = XY * 180 / pi; // is between -90 and 90°
+			}
+			
+			XY = XY + 90.0;
+			amplitude.at<float>(i,j) = sqrt( pow(gradX.at<float>(i,j),2) + pow(gradY.at<float>(i,j),2) );
+			orientation.at<uchar>(i,j) = find_nearest_orientation(XY);
+
+
+		}
+	}
+
+}
+
+
+// Compare orientation with magnitude.
+float Search::compare_gradients(cv::Mat orientation, cv::Mat amplitude, cv::Mat mask1, cv::Mat mask2)
+{
+
+	float hist1[7] = {0};
+	float hist2[7] = {0};
+
+	float normalizationMask1 = 0.0;
+	float normalizationMask2 = 0.0;
+
+	for (int i = 0; i < mask1.size().height; ++i)
+	{
+		for (int j = 0; j < mask1.size().width; ++j)
+		{
+			if (mask1.at<uchar>(i,j)==255)
+			{
+				hist1[orientation.at<uchar>(i,j)] = hist1[orientation.at<uchar>(i,j)] + amplitude.at<float>(i,j);
+				normalizationMask1 = normalizationMask1 + amplitude.at<float>(i,j);
+			}
+
+			if (mask2.at<uchar>(i,j)==255)
+			{
+				hist2[orientation.at<uchar>(i,j)] = hist2[orientation.at<uchar>(i,j)] + amplitude.at<float>(i,j);
+				normalizationMask2 = normalizationMask2 + amplitude.at<float>(i,j);
+			}
+		}
+	}
+
+	for(int k=0; k<7; k++)
+	{
+		if(normalizationMask1) hist1[k] = hist1[k]/normalizationMask1;
+		if(normalizationMask2) hist2[k] = hist2[k]/normalizationMask2;
+	}
+
+	float difference = 0.0;
+	for(int k=0; k<7; k++)
+	{
+		
+		difference = difference + abs(hist1[k] - hist2[k]);
+
+	}
+return difference;
+
+}
+
+
+
+// Second comparison, color ratio.
+void Search::compute_color_ratio(cv::Mat image, cv::Mat mask1, cv::Mat mask2, float& blueRatio, float& greenRatio, float& redRatio, float& blueGreenRatio, float& redGreenRatio)
+{
+	
+	//compute the histogram of the gray image
+	float length1 = 0.0; float length2 = 0.0;
+	float blue1 = 0.0; float green1 = 0.0; float red1 = 0.0;
+	float blue2 = 0.0; float green2 = 0.0; float red2 = 0.0;
+
+	for (int i = 0; i < image.size().height; ++i)
+	{
+		for (int j = 0; j < image.size().width; ++j)
+		{
+			// TODO: list of pixels.
+			if (mask1.at<uchar>(i,j)==255)
+			{
+				cv::Vec3b intensity = image.at<cv::Vec3b>(i, j);
+				blue1 = blue1 + (float)intensity.val[0];
+				green1 = green1 + (float)intensity.val[1];
+				red1 = red1 + (float)intensity.val[2];
+
+				length1 = length1 + 1;
+			}
+			if (mask2.at<uchar>(i,j)==255)
+			{
+				cv::Vec3b intensity = image.at<cv::Vec3b>(i, j);
+				blue2 = blue2 + (float)intensity.val[0];
+				green2 = green2 + (float)intensity.val[1];
+				red2 = red2 + (float)intensity.val[2];
+
+				length2 = length2 + 1;
+			}
+		}
+	}
+
+	float blueMean1 = blue1/length1;	float blueMean2 = blue2/length2;
+	float greenMean1 = green1/length1;	float greenMean2 = green2/length2;
+	float redMean1 = red1/length1;	float redMean2 = red2/length2;
+
+	if(blueMean2!=0) blueRatio = blueMean1/blueMean2;
+	if(greenMean2!=0) greenRatio = greenMean1/greenMean2;
+	if(redMean2!=0) redRatio = redMean1/redMean2;
+
+	if (blueRatio<1 && blueRatio!=0) blueRatio = 1/blueRatio; // in order to have blueRatio(mask1,mask2) = blueRatio(mask2,mask1)
+	if (greenRatio<1 && greenRatio!=0) greenRatio = 1/greenRatio; // in order to have greenRatio(mask1,mask2) = greenRatio(mask2,mask1)
+	if (redRatio<1 && redRatio!=0) redRatio = 1/redRatio; // in order to have redRatio(mask1,mask2) = redRatio(mask2,mask1)
+
+	if(greenRatio!=0.0) 
+	{
+		blueGreenRatio = blueRatio/greenRatio;
+		redGreenRatio = redRatio/greenRatio;
+	}
+		
+	if (blueGreenRatio<1 && blueGreenRatio!=0) blueGreenRatio = 1/blueGreenRatio; // in order to have blueGreenRatio(mask1,mask2) = blueGreenRatio(mask2,mask1)
+	if (redGreenRatio<1 && redGreenRatio!=0) redGreenRatio = 1/redGreenRatio; // in order to have redGreenRatio(mask1,mask2) = redGreenRatio(mask2,mask1)
+
+}
