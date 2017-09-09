@@ -1,8 +1,8 @@
 #ifndef DR_HH
 # define DR_HH
-# include <cv.h>
-# include <cvaux.h>
-# include <highgui.h>
+# include <opencv/cv.h>
+# include <opencv/cvaux.h>
+# include <opencv/highgui.h>
 
 # include <list>
 # include <iostream>
@@ -15,7 +15,11 @@
 
 class DR
 {
+	typedef std::vector<cv::Mat> Mat_v;
+
+
   public:
+
     // Policy for the patch copying.
     enum COPY_P
     {
@@ -24,7 +28,7 @@ class DR
     };
 
     // Constructor with the input and the contour.
-    DR(char* mask, char* input, COPY_P cp = SIMPLE);
+    DR(char* mask, char* input, std::string& prefix, COPY_P cp = SIMPLE);
     void inpaint();
 
   private:
@@ -47,6 +51,7 @@ class DR
     COPY_P cp_;
     cv::Mat mask_;
     cv::Mat input_;
+	std::string prefix_;
     size_t nb_iter_;
     size_t iter_;
     size_t max_scale_;
@@ -56,10 +61,10 @@ class DR
 
     // Pyramid attributes.
 
-    std::vector<cv::Mat> pyramid_image_;
-    std::vector<cv::Mat> pyramid_mapping_;
-    std::vector<cv::Mat> pyramid_mask_;
-    std::vector<cv::Mat> pyramid_cost_;
+    Mat_v pyramid_image_;
+    Mat_v pyramid_mapping_;
+    Mat_v pyramid_mask_;
+    Mat_v pyramid_cost_;
 
     // Size of patches for every layers of the pyramid.
     std::vector<int> pyramid_size_;
