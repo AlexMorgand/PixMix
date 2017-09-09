@@ -2,18 +2,19 @@
 
 int main(int argc, char* argv[])
 {
-	std::string prefix("C:/Users/am237982/Desktop/PixMix/pixmix/input/");
+	std::string prefix("C:/Users/am237982/Desktop/cea/CEA/Alexandre/Dev/supermedia_inpaint/PixMix/pixmix/input/");
 
   std::list<std::pair<char*, char*> > tests;
-  /*tests.push_back(std::make_pair(strdup("ombres/Guo4.png"), strdup("ombres/Guo4.tif")));
-  tests.push_back(std::make_pair(strdup("ombres/Guo6.png"), strdup("ombres/Guo6.tif")));
-  tests.push_back(std::make_pair(strdup("ombres/Guo1.png"), strdup("ombres/Guo1.tif")));
-  tests.push_back(std::make_pair(strdup("chairi.PNG"), strdup("chair.PNG")));
-  tests.push_back(std::make_pair(strdup("bw1mask.png"), strdup("bw1.png")));*/
-  tests.push_back(std::make_pair(strdup("her2mask.png"), strdup("her2.png")));
-  //tests.push_back(std::make_pair(strdup("C:/Users/am237982/Desktop/PixMix/pixmix/input/her1mask.png"), strdup("C:/Users/am237982/Desktop/PixMix/pixmix/input/her1.png")));
-  /*tests.push_back(std::make_pair(strdup("1mask.png"), strdup("1.png")));
-  tests.push_back(std::make_pair(strdup("2mask.png"), strdup("2.png")));*/
+  //tests.push_back(std::make_pair(strdup("ombres/Guo4.png"), strdup("ombres/Guo4.tif")));
+  //tests.push_back(std::make_pair(strdup("ombres/Guo6.png"), strdup("ombres/Guo6.tif")));
+  //tests.push_back(std::make_pair(strdup("ombres/Guo1.png"), strdup("ombres/Guo1.tif")));
+  //tests.push_back(std::make_pair(strdup("chairi.PNG"), strdup("chair.PNG")));
+  //tests.push_back(std::make_pair(strdup("bw1mask.png"), strdup("bw1.png")));
+  //tests.push_back(std::make_pair(strdup("her2mask.png"), strdup("her2.png")));
+  //tests.push_back(std::make_pair(strdup("her1mask.png"), strdup("her1.png")));
+  //tests.push_back(std::make_pair(strdup("argmask.png"), strdup("arg.jpg")));
+  tests.push_back(std::make_pair(strdup("1mask.png"), strdup("1.png")));
+  //tests.push_back(std::make_pair(strdup("2mask.png"), strdup("2.png")));
 //  char* mask = strdup("input/Alexandre/mask_85.png");
 //  char* str = strdup("input/Alexandre/0085.jpg");
 //  char* mask = strdup("input/panneaumask.png");
