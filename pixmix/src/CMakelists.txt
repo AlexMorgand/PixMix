@@ -1,0 +1,50 @@
+include_directories(${PIXMIX_SOURCE_DIR}/include)
+
+set(SOURCES main.cc dr.cc)
+
+add_executable(PIXMIX ${SOURCES})
+
+# Hard coded link, only for windows.
+set(LIBS "C:/Users/am237982/Desktop/cea/CEA/Alexandre/Dev/LcviExtern/2015.01.2/dynamic/opencv2.49/vc10/standard/lib")
+
+set(RUNTIME_LIBS "C:/Users/am237982/Desktop/cea/CEA/Alexandre/Dev/LcviExtern/2015.01.2/dynamic/opencv2.49/vc10/standard/bin")
+
+set(OPENMP_LIBS 
+"C:/Users/am237982/Desktop/cea/CEA/Alexandre/Dev/external_lib/OpenMP/lib")
+
+set(OPENMP_RUNTIME_LIBS 
+"C:/Users/am237982/Desktop/cea/CEA/Alexandre/Dev/external_lib/OpenMP")
+
+
+set(PIXMIX_RELEASE_LIB 
+	optimized ${LIBS}/opencv_highgui249.lib
+	optimized ${LIBS}/opencv_imgproc249.lib
+	optimized ${LIBS}/opencv_core249.lib
+	optimized ${OPENMP_LIBS}/vcomp.lib)
+	
+set(PIXMIX_DEBUG_LIB 
+	debug ${LIBS}/opencv_highgui249d.lib
+	debug ${LIBS}/opencv_imgproc249d.lib
+	debug ${LIBS}/opencv_core249d.lib
+	debug ${OPENMP_LIBS}/vcompd.lib)
+
+
+target_link_libraries(PIXMIX ${PIXMIX_RELEASE_LIB} ${PIXMIX_DEBUG_LIB})
+
+
+add_custom_command(TARGET PIXMIX POST_BUILD        # Adds a post-build event to MyTest
+    COMMAND ${CMAKE_COMMAND} -E copy  ${RUNTIME_LIBS}/opencv_core249.dll ${CMAKE_BINARY_DIR}/src/Release
+	COMMAND ${CMAKE_COMMAND} -E copy  ${RUNTIME_LIBS}/opencv_highgui249.dll ${CMAKE_BINARY_DIR}/src/Release
+	COMMAND ${CMAKE_COMMAND} -E copy  ${RUNTIME_LIBS}/opencv_imgproc249.dll ${CMAKE_BINARY_DIR}/src/Release
+	COMMAND ${CMAKE_COMMAND} -E copy  ${OPENMP_RUNTIME_LIBS}/vcomp90.dll ${CMAKE_BINARY_DIR}/src/Release
+	
+	
+	COMMAND ${CMAKE_COMMAND} -E copy  ${RUNTIME_LIBS}/opencv_core249d.dll ${CMAKE_BINARY_DIR}/src/Debug
+	COMMAND ${CMAKE_COMMAND} -E copy  ${RUNTIME_LIBS}/opencv_highgui249d.dll ${CMAKE_BINARY_DIR}/src/Debug
+	COMMAND ${CMAKE_COMMAND} -E copy  ${RUNTIME_LIBS}/opencv_imgproc249d.dll ${CMAKE_BINARY_DIR}/src/Debug
+	COMMAND ${CMAKE_COMMAND} -E copy  ${OPENMP_RUNTIME_LIBS}/vcomp90ui.dll ${CMAKE_BINARY_DIR}/src/Debug
+	
+	
+	COMMENT "Copying binaries from '${RUNTIME_LIBS}/../../bin/' to '${CMAKE_BINARY_DIR}/src/Release'" VERBATIM
+	)
+	
