@@ -7,6 +7,7 @@
 # include <list>
 # include <iostream>
 # include <time.h>
+# include <algorithm>
 
 
 // Class for Diminished reality purposes.
