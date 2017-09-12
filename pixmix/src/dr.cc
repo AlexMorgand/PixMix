@@ -31,12 +31,13 @@ void DR::offset_scaling_up()
 	for (it = pyramid_target_pixels_[scale_iter_].begin(); it != pyramid_target_pixels_[scale_iter_].end(); ++it)
     {
 		std::list<cv::Point> fill_list;
-		fill_list.push_back(cv::Point(it->x / 2 , it->y / 2));
-		if (it->x % 2 != 0)
+		if (in_image(it->x / 2, it->y / 2, pyramid_mapping_[scale_iter_ + 1]))
+			fill_list.push_back(cv::Point(it->x / 2 , it->y / 2));
+		if (it->x % 2 != 0 && in_image(it->x / 2 + 1, it->y / 2, pyramid_mapping_[scale_iter_ + 1]))
 			fill_list.push_back(cv::Point((it->x / 2) + 1 , it->y / 2));
-		if (it->y % 2 != 0)
+		if (it->y % 2 != 0 && in_image(it->x / 2, it->y / 2 + 1, pyramid_mapping_[scale_iter_ + 1]))
 			fill_list.push_back(cv::Point(it->x / 2 , (it->y / 2) + 1));
-		if (it->x % 2 != 0 && it->y % 2 != 0)
+		if (it->x % 2 != 0 && it->y % 2 != 0 && in_image(it->x / 2 + 1, it->y / 2 + 1, pyramid_mapping_[scale_iter_ + 1]))
 			fill_list.push_back(cv::Point((it->x / 2) + 1 , (it->y / 2) + 1));
 		auto ab = fill_list.begin();
 
@@ -61,7 +62,6 @@ void DR::offset_scaling_up()
 			m.x *= 2.0;
 			m.y *= 2.0;
 			pyramid_mapping_[scale_iter_].at<cv::Point>(it->x, it->y) = m;
-
 			patch_copy(*it, cv::Point(m.x + it->x, m.y + it->y));
 			pyramid_cost_[scale_iter_].at<float>(it->x, it->y) = pyramid_cost_[scale_iter_ + 1].at<float>(ab->x, ab->y);
 			tmp.at<cv::Vec3b>(it->x, it->y) = pyramid_image_[scale_iter_].at<cv::Vec3b>(m.x + it->x, m.y + it->y);
@@ -69,7 +69,6 @@ void DR::offset_scaling_up()
 		}
 		else
 		{
-			//std::cout << "Cannot found a match " << it->x << " " << it->y << std::endl;
 			//pyramid_cost_[scale_iter_].at<float>(it->x, it->y) = pow(255, 2.0) * 3;
 			tmp.at<cv::Vec3b>(it->x, it->y) = cv::Vec3b(255, 0, 0);
 		}
@@ -248,7 +247,7 @@ void DR::build_mask()
         bool stop = false;
 		pyramid_cost_[scale_iter_].at<float>(it->x, it->y) = cost_bullshit(*it, max, stop);
     }
-    cv::waitKey(0);
+    cv::waitKey(1);
 }
 
 void DR::patch_copy(cv::Point dst, cv::Point src)
@@ -290,8 +289,6 @@ void DR::random_search(cv::Point& p, double& curr_cost)
     bool stop = false;
 
     // Random value between [-1;1]
-    float rx = rand() % 2000 / 1000.f - 1.f;
-    float ry = rand() % 2000 / 1000.f - 1.f;
     int i = 0;
     float hypo;
     cv::Mat tmp_map = pyramid_mapping_[scale_iter_];
@@ -299,6 +296,8 @@ void DR::random_search(cv::Point& p, double& curr_cost)
     cv::Point old = tmp_map.at<cv::Point>(p.x, p.y);
     do
     {
+		float rx = rand() % 2000 / 1000.f - 1.f;
+		float ry = rand() % 2000 / 1000.f - 1.f;
         alphai = pow(alpha, i);
         cv::Point pt(w * alphai * rx, w * alphai * ry);
         hypo = sqrt(pow(pt.x, 2.0) + pow(pt.y, 2.0));
@@ -306,28 +305,23 @@ void DR::random_search(cv::Point& p, double& curr_cost)
         cv::Point randp(tmp_map.at<cv::Point>(p.x, p.y).x + p.x + pt.x,
                         tmp_map.at<cv::Point>(p.x, p.y).y + p.y + pt.y);
 
-		// FIXME: we cannot fail right ?
-        if ((randp.x > (patch_size_ / 2) && randp.x < (tmp_map.rows - patch_size_ /*pyramid_size_[scale_iter_]*/ / 2)) &&
-             (randp.y > (patch_size_ / 2) && randp.y < (tmp_map.cols - patch_size_ /*pyramid_size_[scale_iter_]*/ / 2)))
+		
+        if (in_image(randp.x, randp.y, pyramid_mask_[scale_iter_]) && pyramid_mask_[scale_iter_].at<uchar>(randp.x, randp.y) == 0)
         {
+            tmp_map.at<cv::Point>(p.x, p.y).x = randp.x - p.x;
+            tmp_map.at<cv::Point>(p.x, p.y).y = randp.y - p.y;
 
-            if (pyramid_mask_[scale_iter_].at<uchar>(randp.x, randp.y) == 0)
+            stop = false;
+            double cost = cost_bullshit(p, curr_cost, stop);
+
+            if (!stop && cost < curr_cost)
             {
-                tmp_map.at<cv::Point>(p.x, p.y).x = randp.x - p.x;
-                tmp_map.at<cv::Point>(p.x, p.y).y = randp.y - p.y;
-
-                stop = false;
-                double cost = cost_bullshit(p, curr_cost, stop);
-
-                if (!stop && cost < curr_cost)
-                {
-                    curr_cost = cost;
-                    old = tmp_map.at<cv::Point>(p.x, p.y);
-					patch_copy(p, cv::Point(p.x + old.x, p.y + old.y));
-                }
-                else
-                    tmp_map.at<cv::Point>(p.x, p.y) = old;
+                curr_cost = cost;
+                old = tmp_map.at<cv::Point>(p.x, p.y);
+				patch_copy(p, cv::Point(p.x + old.x, p.y + old.y));
             }
+            else
+                tmp_map.at<cv::Point>(p.x, p.y) = old;
         }
 
         i++;
@@ -336,7 +330,7 @@ void DR::random_search(cv::Point& p, double& curr_cost)
     while (hypo >= 1);
 }
 
-// FIXME: the border cost should be very low !
+// FIXME: not sure if we need to fill at the borders !
 void DR::improve(cv::Point p, size_t cpt, double& cost)
 {
     bool stop;
@@ -355,7 +349,8 @@ void DR::improve(cv::Point p, size_t cpt, double& cost)
             // Up is better ?
             newx = pyramid_mapping_[scale_iter_].at<cv::Point>(p.x - 1, p.y);
             // Take the pixel above if you're at the border.
-            if (pyramid_mask_[scale_iter_].at<uchar>(p.x - 1, p.y) == 0)
+            if (in_image(p.x - 1, p.y, pyramid_mask_[scale_iter_]) &&
+				pyramid_mask_[scale_iter_].at<uchar>(p.x - 1, p.y) == 0)
             {
                 newx.x = -1;
                 newx.y = 0;
@@ -377,7 +372,8 @@ void DR::improve(cv::Point p, size_t cpt, double& cost)
             newx = pyramid_mapping_[scale_iter_].at<cv::Point>(p.x + 1, p.y);
 
             // If we're still in the mask take the border.
-            if (pyramid_mask_[scale_iter_].at<uchar>(p.x + 1, p.y) == 0)
+            if (in_image(p.x + 1, p.y, pyramid_mask_[scale_iter_]) &&
+				pyramid_mask_[scale_iter_].at<uchar>(p.x + 1, p.y) == 0)
             {
                 newx.x = 1;
                 newx.y = 0;
@@ -390,7 +386,7 @@ void DR::improve(cv::Point p, size_t cpt, double& cost)
             out = true;
     }
 
-    if (!out)
+    if (!out && in_image(p.x + newx.x, p.y + newx.y, pyramid_mapping_[scale_iter_]))
     {
         pyramid_mapping_[scale_iter_].at<cv::Point>(p.x, p.y) = newx;
 
@@ -404,6 +400,7 @@ void DR::improve(cv::Point p, size_t cpt, double& cost)
             curr_cost = cost;
             old = pyramid_mapping_[scale_iter_].at<cv::Point>(p.x, p.y);
 			patch_copy(p, cv::Point(p.x + old.x, p.y + old.y));
+
         }
         else
             pyramid_mapping_[scale_iter_].at<cv::Point>(p.x, p.y) = old;
@@ -420,7 +417,8 @@ void DR::improve(cv::Point p, size_t cpt, double& cost)
             newy = pyramid_mapping_[scale_iter_].at<cv::Point>(p.x, p.y - 1);
 
             // If we're still in the mask take the border.
-            if (pyramid_mask_[scale_iter_].at<uchar>(p.x, p.y - 1) == 0)
+            if (in_image(p.x, p.y - 1, pyramid_mask_[scale_iter_]) &&
+				pyramid_mask_[scale_iter_].at<uchar>(p.x, p.y - 1) == 0)
             {
                 newy.x = 0;
                 newy.y = -1;
@@ -442,7 +440,8 @@ void DR::improve(cv::Point p, size_t cpt, double& cost)
             newy = pyramid_mapping_[scale_iter_].at<cv::Point>(p.x, p.y + 1);
 
             // If we're still in the mask take the border.
-            if (pyramid_mask_[scale_iter_].at<uchar>(p.x, p.y + 1) == 0)
+            if (in_image(p.x, p.y + 1, pyramid_mask_[scale_iter_]) &&
+				pyramid_mask_[scale_iter_].at<uchar>(p.x, p.y + 1) == 0)
             {
                 newy.x = 0;
                 newy.y = 1;
@@ -455,7 +454,8 @@ void DR::improve(cv::Point p, size_t cpt, double& cost)
             out = true;
     }
 
-    if (!out)
+	// FIXME: not pretty 
+    if (!out && in_image(p.x + newy.x, p.y + newy.y, pyramid_mapping_[scale_iter_]))
     {
         pyramid_mapping_[scale_iter_].at<cv::Point>(p.x, p.y) = newy;
 
@@ -500,6 +500,18 @@ void DR::inpaint()
 		  patch_size_ = 7;
 	  else if (scale_iter_ == 0)
 		  patch_size_ = 5;
+	  
+	  //if (scale_iter_ == 4)
+		 // patch_size_ = 25;
+	  //else if (scale_iter_ == 3)
+		 // patch_size_ = 15;
+	  //else if (scale_iter_ == 2)
+		 // patch_size_ = 11;
+	  //else if (scale_iter_ == 1)
+		 // patch_size_ = 9;
+	  //else if (scale_iter_ == 0)
+		 // patch_size_ = 7;
+
 
 	  // At the lowest resolution, the init is completely random.
       if (scale_iter_ == max_scale_)
@@ -567,16 +579,8 @@ void DR::inpaint()
 		  }
 
           cv::Mat temp = pyramid_image_[scale_iter_].clone();
-          // Copy the pixel.
-          for (it2 = pyramid_target_pixels_[scale_iter_].begin(); it2 != pyramid_target_pixels_[scale_iter_].end(); ++it2)
-          {
-              cv::Point tmp = pyramid_mapping_[scale_iter_].at<cv::Point>(it2->x, it2->y);
-              cv::line(temp, cv::Point(it2->y, it2->x), cv::Point(it2->y + tmp.y, it2->x + tmp.x), cv::Scalar(0, 0, 255));
-              patch_copy(*it2, cv::Point(it2->x + tmp.x, it2->y + tmp.y));
-          }
-
+          
           // BEGIN: debug stuff.
-          temp = pyramid_image_[scale_iter_].clone();
           cv::resize(pyramid_image_[scale_iter_], temp, pyramid_image_[0].size(),0, 0, cv::INTER_NEAREST);
           cv::Mat lol = cv::Mat(pyramid_cost_[scale_iter_].size(), CV_8UC1, cv::Scalar(0, 0, 0));
 
@@ -601,6 +605,5 @@ void DR::inpaint()
       }
   }
   res_ = pyramid_image_[0].clone();
-  //cvtColor(res_, res_, cv::COLOR_Lab2BGR);
   cv::imwrite(prefix_ + std::string("res2.jpg"), res_);
 }

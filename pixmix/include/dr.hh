@@ -70,6 +70,7 @@ class DR
     // Size of patches for every layers of the pyramid.
     std::vector<int> pyramid_size_;
 
+	// FIXME: have a matrix for each pyramid.
     std::vector<std::list<cv::Point> > pyramid_target_pixels_;
     cv::Mat res_;
 };
