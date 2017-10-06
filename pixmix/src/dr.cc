@@ -78,10 +78,33 @@ void DR::offset_scaling_up()
     cv::imshow("scaled", tmp2);
 }
 
-DR::DR(char* mask, char* input, std::string& prefix, COPY_P cp)
+void DR::init()
+{
+	cv::Mat curr = input_;
+	cv::Mat curr_m = mask_;
+	pyramid_image_[0] = input_;
+	pyramid_cost_[0] = cv::Mat(curr.size(), CV_32FC1, cv::Scalar(0, 0, 0));
+	pyramid_mapping_[0] = cv::Mat(curr.size(), CV_32SC2);
+	pyramid_mask_[0] = mask_;
+
+	for (size_t i = 1; i <= max_scale_; ++i)
+	{
+		curr = Scale(1, curr);
+		pyramid_image_[i] = curr;
+	  
+		curr_m = Scale(1, curr_m);
+		pyramid_mask_[i] = curr_m;
+
+		pyramid_cost_[i] = cv::Mat(curr.size(), CV_32FC1, cv::Scalar(0, 0, 0));
+		pyramid_mapping_[i] =  cv::Mat(curr.size(), CV_32SC2);
+	}
+
+	srand(time(0));
+	//srand(0);
+}
+
+DR::DR(cv::Mat& mask, cv::Mat& input, std::string& prefix, COPY_P cp)
   : cp_(cp),
-    mask_(cv::imread(prefix + mask, CV_LOAD_IMAGE_GRAYSCALE)),
-    input_(cv::imread(prefix + input)),
 	prefix_(prefix),
     nb_iter_(5),
     iter_(5),
@@ -97,27 +120,30 @@ DR::DR(char* mask, char* input, std::string& prefix, COPY_P cp)
     pyramid_target_pixels_(5),
     res_(input_.size(), CV_8UC3)
 {
-  cv::Mat curr = input_;
-  cv::Mat curr_m = mask_;
-  pyramid_image_[0] = input_;
-  pyramid_cost_[0] = cv::Mat(curr.size(), CV_32FC1, cv::Scalar(0, 0, 0));
-  pyramid_mapping_[0] = cv::Mat(curr.size(), CV_32SC2);
-  pyramid_mask_[0] = mask_;
+	init();	
+}
 
-  for (size_t i = 1; i <= max_scale_; ++i)
-  {
-      curr = Scale(1, curr);
-      pyramid_image_[i] = curr;
-	  
-      curr_m = Scale(1, curr_m);
-      pyramid_mask_[i] = curr_m;
 
-      pyramid_cost_[i] = cv::Mat(curr.size(), CV_32FC1, cv::Scalar(0, 0, 0));
-      pyramid_mapping_[i] =  cv::Mat(curr.size(), CV_32SC2);
-  }
-
-  srand(time(0));
-  //srand(0);
+DR::DR(char* mask, char* input, std::string& prefix, COPY_P cp)
+  : cp_(cp),
+	prefix_(prefix),
+	mask_(cv::imread(prefix + mask, CV_LOAD_IMAGE_GRAYSCALE)),
+	input_(cv::imread(prefix + input)),
+    nb_iter_(5),
+    iter_(5),
+    max_scale_(4),
+    scale_iter_(4),
+    // PatchMatch : 9, pixmix : 5, good : 11. 15 is phenomenal.
+    patch_size_(21),
+    pyramid_image_(5),
+    pyramid_mapping_(5),
+    pyramid_mask_(5),
+    pyramid_cost_(5),
+    pyramid_size_(5),
+    pyramid_target_pixels_(5),
+    res_(input_.size(), CV_8UC3)
+{
+	init();
 }
 
 

@@ -5,10 +5,13 @@ int main(int argc, char* argv[])
 	std::string prefix("C:/Users/am237982/Desktop/cea/CEA/Alexandre/Dev/supermedia_inpaint/PixMix/pixmix/input/");
 
   std::list<std::pair<char*, char*> > tests;
+  tests.push_back(std::make_pair(strdup("pixmixex1_mask.png"), strdup("pixmixex1.png")));
+  tests.push_back(std::make_pair(strdup("pixmixex2_mask.png"), strdup("pixmixex2.png")));
+  tests.push_back(std::make_pair(strdup("pixmixex3_mask.png"), strdup("pixmixex3.png")));
+  //tests.push_back(std::make_pair(strdup("tatoo_mask.jpg"), strdup("tatoo.jpg")));
   tests.push_back(std::make_pair(strdup("fontainmask.png"), strdup("fontainreal.jpg")));
   tests.push_back(std::make_pair(strdup("bungeemask.png"), strdup("bungeereal.jpg")));
-  tests.push_back(std::make_pair(strdup("boat_mask.jpg"), strdup("boat.jpg")));
-  tests.push_back(std::make_pair(strdup("boat_mask.jpg"), strdup("boat.jpg")));
+  //tests.push_back(std::make_pair(strdup("boat_mask.jpg"), strdup("boat.jpg")));
   tests.push_back(std::make_pair(strdup("panneaumask.png"), strdup("panneau.jpg")));
   tests.push_back(std::make_pair(strdup("ombres/Guo4.png"), strdup("ombres/Guo4.tif")));
   tests.push_back(std::make_pair(strdup("ombres/Guo8.png"), strdup("ombres/Guo8.jpg")));

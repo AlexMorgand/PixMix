@@ -3,16 +3,15 @@
 # include <opencv/cv.h>
 # include <opencv/cvaux.h>
 # include <opencv/highgui.h>
+# include <opencv/cvwimage.h>
 
 # include <list>
 # include <iostream>
 # include <time.h>
 # include <algorithm>
 
-
 // Class for Diminished reality purposes.
 // Handle images and video streams (online and offline).
-// Contour can be contours or colors only.
 
 class DR
 {
@@ -30,9 +29,13 @@ class DR
 
     // Constructor with the input and the contour.
     DR(char* mask, char* input, std::string& prefix, COPY_P cp = SIMPLE);
+    DR(cv::Mat& mask, cv::Mat& input, std::string& prefix, COPY_P cp = SIMPLE);
     void inpaint();
 
   private:
+	// Init.
+	void init();
+
     // Copy the previous layer of the pyramid.
     void offset_scaling_up();
 
