@@ -33,9 +33,7 @@ class DR
     void inpaint();
 
   private:
-	// Init.
 	void init();
-
     // Copy the previous layer of the pyramid.
     void offset_scaling_up();
 

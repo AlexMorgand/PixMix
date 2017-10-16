@@ -78,6 +78,8 @@ void DR::offset_scaling_up()
     cv::imshow("scaled", tmp2);
 }
 
+
+
 void DR::init()
 {
 	cv::Mat curr = input_;
@@ -105,6 +107,9 @@ void DR::init()
 
 DR::DR(cv::Mat& mask, cv::Mat& input, std::string& prefix, COPY_P cp)
   : cp_(cp),
+	// FIXME : Not sure if deepcopy.
+    mask_(mask),
+    input_(input),
 	prefix_(prefix),
     nb_iter_(5),
     iter_(5),
@@ -120,28 +125,29 @@ DR::DR(cv::Mat& mask, cv::Mat& input, std::string& prefix, COPY_P cp)
     pyramid_target_pixels_(5),
     res_(input_.size(), CV_8UC3)
 {
-	init();	
+	init();
 }
 
 
 DR::DR(char* mask, char* input, std::string& prefix, COPY_P cp)
-  : cp_(cp),
-	prefix_(prefix),
-	mask_(cv::imread(prefix + mask, CV_LOAD_IMAGE_GRAYSCALE)),
-	input_(cv::imread(prefix + input)),
-    nb_iter_(5),
-    iter_(5),
-    max_scale_(4),
-    scale_iter_(4),
-    // PatchMatch : 9, pixmix : 5, good : 11. 15 is phenomenal.
-    patch_size_(21),
-    pyramid_image_(5),
-    pyramid_mapping_(5),
-    pyramid_mask_(5),
-    pyramid_cost_(5),
-    pyramid_size_(5),
-    pyramid_target_pixels_(5),
-    res_(input_.size(), CV_8UC3)
+	: cp_(cp),
+	  prefix_(prefix),
+	  mask_(cv::imread(prefix + mask, CV_LOAD_IMAGE_GRAYSCALE)),
+	  input_(cv::imread(prefix + input)),
+	  nb_iter_(5),
+	  iter_(5),
+	  max_scale_(4),
+	  scale_iter_(4),
+	  // PatchMatch : 9, pixmix : 5, good : 11. 15 is phenomenal.
+      patch_size_(21),
+	  pyramid_image_(5),
+	  pyramid_mapping_(5),
+	  pyramid_mask_(5),
+	  pyramid_cost_(5),
+	  pyramid_size_(5),
+      pyramid_target_pixels_(5),
+	  res_(input_.size(), CV_8UC3)
+
 {
 	init();
 }
