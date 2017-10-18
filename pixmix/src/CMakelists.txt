@@ -1,6 +1,6 @@
 include_directories(${PIXMIX_SOURCE_DIR}/include)
 
-set(SOURCES main.cc dr.cc)
+set(SOURCES main.cc dr.cc tracking.cc)
 
 add_executable(PIXMIX ${SOURCES})
 
