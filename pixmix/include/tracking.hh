@@ -13,6 +13,8 @@
 
 class Tracking
 {
+	typedef std::vector<cv::Mat> Mat_v;
+
 	public:
 		Tracking(const std::vector<cv::Point>& rough_selection);
 		void build_mask(const cv::Mat& frame);
@@ -28,6 +30,8 @@ class Tracking
 		void dissimilarity_computing();
 		cv::Vec3f maximal_deviation(int cluster);
 		cv::Vec3f characteristic_computing(const cv::Point& p);
+		void init();
+		void dissimilarity_scaling_up();
 
 		std::vector<cv::Point> rough_selection_;
 		bool debug_;
@@ -46,6 +50,11 @@ class Tracking
 		std::vector<cv::Vec3f> v_;
 		cv::Vec3f vmax_;
 		float tolerance_thres_;
+		cv::Mat3f gauss_img_;
+		Mat_v pyramid_image_;
+		std::vector<std::vector<cv::Point>> pyramid_rough_cont_;
+		Mat_v dissimilarity_piramid_;
+		unsigned int multiply_contours_;
 };
 
 # endif /* !TRACKING_HH */

@@ -8,7 +8,12 @@ Tracking::Tracking(const std::vector<cv::Point>& rough_selection)
 	  cluster_(),
 	  v_(),
 	  vmax_(0, 0, 0),
-	  tolerance_thres_(0.95)
+	  tolerance_thres_(0.95),
+	  gauss_img_(),
+	  pyramid_image_(5),
+	  pyramid_rough_cont_(5),
+	  dissimilarity_piramid_(5),
+	  multiply_contours_(10)
 {
 }
 
@@ -55,9 +60,9 @@ void Tracking::hull_sampling(const std::vector<cv::Point>& hull, unsigned int fa
 #endif
 }
 
-
 cv::Vec3f Tracking::characteristic_computing(const cv::Point& p)
 {
+	/*
 	// FIXME: handle corners, not a acceptable case or find something else.
 	int kernel_size = 5;
 	std::vector<unsigned char> median_r(kernel_size * kernel_size);
@@ -90,14 +95,18 @@ cv::Vec3f Tracking::characteristic_computing(const cv::Point& p)
 	median_it = median_r.begin() + median_r.size() / 2;
 	std::nth_element(median_r.begin(), median_it , median_r.end());
 	auto r = *median_it;
-
+	
 	return cv::Vec3f(b, g, r);
+	*/
+
+	cv::Vec3f tmp = gauss_img_.at<cv::Vec3f>(p.y, p.x);
+	return tmp;
 }
 
 void Tracking::selection_refinement(const std::vector<cv::Point>& hull)
 {
 	// We want enough fingerprints to correctly segment the object.
-	hull_sampling(hull, 3);
+	hull_sampling(hull, multiply_contours_);
 
 	std::vector<std::vector<cv::Point>> cont(1);
 	cont[0] = outline_;
@@ -109,26 +118,35 @@ void Tracking::selection_refinement(const std::vector<cv::Point>& hull)
 		finger_char_[i] = characteristic_computing(outline_[i]);
 
 	// Clustering.
-	unsigned int iteration = 4;
+	unsigned int iteration = 0, max_int = 5;
 	std::vector<cv::Vec3f> min_v;
+	float min_res = FLT_MAX;
 	std::vector<int> min_clu;
 	cv::Vec3f min_vmax(FLT_MAX, FLT_MAX, FLT_MAX);
-	for (unsigned int i = 0; i < iteration; ++i)
+	while (iteration != max_int)
 	{
 		clustering();
 		unsigned int k = 0;
+		float res = 0;
+		std::cout << "Current maximal deviation " << vmax_ << std::endl;
 		for (unsigned int c = 0; c < 3; ++c)
 		{
-			if (min_vmax[c] < vmax_[c])
-				++k;
+			//if (min_vmax[c] < vmax_[c])
+			//	++k;
+			res += vmax_[c];
 		}
-		if (k == 3)
+		//if (k == 3)
+		if (min_res > res)
 		{
-			std::cout << "Current minimal deviation " << vmax_ << std::endl;
+			std::cout << "Replace by " << vmax_ << std::endl;
 			min_clu = cluster_;
 			min_v = v_;
 			min_vmax = vmax_;
+			iteration = 0;
+			min_res = res;
 		}
+		else
+			++iteration;
 	}
 
 	cluster_ = min_clu;
@@ -137,9 +155,6 @@ void Tracking::selection_refinement(const std::vector<cv::Point>& hull)
 	
 	// Compute the dissimilarity map.
 	dissimilarity_computing();
-
-	cv::imshow("lolilol", illustration);
-	cv::waitKey(0);
 }
 
 void Tracking::clustering()
@@ -149,6 +164,7 @@ void Tracking::clustering()
 	// Init with every cluster assigned to 0.
 	cluster_ = std::vector<int>(outline_.size() ,-1);
 	v_.clear();
+	vmax_ = cv::Vec3f(0, 0, 0);
 
 	unsigned int nb_assigned = 1, cur_clu = 1;
 
@@ -170,7 +186,8 @@ void Tracking::clustering()
 				if (abs(finger_char_[i][c] - finger_char_[first][c]) > v_[0][c])
 					++k;
 			}
-			if (k == 0)
+			//if (!k)
+			if (k != 3)
 			{
 				cluster_[i] = 0;
 				cv::circle(illustration, outline_[i], 1, col, 10);
@@ -210,7 +227,8 @@ void Tracking::clustering()
 					if (abs(finger_char_[i][c] - finger_char_[first][c]) > v_[cur_clu][c])
 						++k;
 				}
-				if (!k)
+				//if (!k)
+				if (k != 3)
 				{
 					cluster_[i] = cur_clu;
 					cv::circle(illustration, outline_[i], 1, col, 10);
@@ -264,9 +282,9 @@ cv::Vec3f Tracking::maximal_deviation(int cluster)
 	{
 		square_mean[c] /= nb_clust_elt;
 		mean[c] /= nb_clust_elt;
-		// Since the # of cluster is one at the begining, don't do a max.
 		tmp[c] = sqrt(square_mean[c] - pow(mean[c], 2));
 	}
+
 
 	return tmp;
 }
@@ -288,34 +306,134 @@ void Tracking::dissimilarity_computing()
 					unsigned int tmp_c = 0;
 					for (unsigned int c = 0; c < 3; ++c)
 					{
-						if (abs(finger_char_[k][c] - chara[c]) > /*v_[cluster_[k]][c]*/vmax_[c])
+						if (abs(finger_char_[k][c] - chara[c]) > /*v_[cluster_[k]][c]*/ vmax_[c])
 							++tmp_c;
 					}
-					if (tmp_c == 3)
+					//if (tmp_c == 3)
+					if (tmp_c)
 						++tmp;
 				}
 				if (tmp >= outline_.size() * tolerance_thres_)
-				{
-					illustration.at<cv::Vec3b>(i, j) = cv::Vec3b(0, 0, 255);
 					d_map_.at<uchar>(i, j) = 255;
-				}
 			}
 		}
 	}
 }
 
+cv::Mat Scale2(int numberOfScales, cv::Mat image)
+{
+    cv::Mat temp = image.clone();
+    for (int i = 0; i < numberOfScales; i++)
+        cv::resize(image, temp, cv::Size(), 0.5, 0.5, cv::INTER_NEAREST);
+    return temp;
+}
+
+void Tracking::dissimilarity_scaling_up()
+{
+	//cv::dilate(dissimilarity_piramid_[4], dissimilarity_piramid_[4], cv::Mat(), cv::Point(-1,-1));
+	for (int scale = 3; scale >= 0; --scale)
+    {
+		for (unsigned int i = 0; i < pyramid_image_[scale + 1].rows; ++i)
+		{
+			for (unsigned int j = 0; j < pyramid_image_[scale + 1].cols; ++j)
+			{
+				if (dissimilarity_piramid_[scale + 1].at<uchar>(i, j) == 255)
+				{
+					cv::Point m(i, j);
+					//dissimilarity_piramid_[scale].at<char>(m.x * 2, m.y * 2) = 255;
+					dissimilarity_piramid_[scale].at<char>(m.x, m.y) = 255;
+				}
+			}
+		}
+		//cv::dilate(dissimilarity_piramid_[scale], dissimilarity_piramid_[scale], cv::Mat(), cv::Point(-1,-1));
+    }
+}
+
+void Tracking::init()
+{
+	unsigned int max_scale_ = 4;
+	cv::Mat curr = frame_;
+	pyramid_image_[0] = frame_;
+	pyramid_rough_cont_[0] = rough_selection_;
+	dissimilarity_piramid_[0] = d_map_;
+
+	for (size_t i = 1; i <= max_scale_; ++i)
+	{
+		//curr = Scale2(1, curr);
+		dissimilarity_piramid_[i] = cv::Mat(curr.size(), CV_8UC1, cv::Scalar(0));
+		pyramid_image_[i] = curr;
+		pyramid_rough_cont_[i].resize(rough_selection_.size());
+		for (unsigned int k = 0; k < rough_selection_.size(); ++k)
+			//pyramid_rough_cont_[i][k] = cv::Point(pyramid_rough_cont_[i - 1][k].x / 2, pyramid_rough_cont_[i - 1][k].y / 2);
+			pyramid_rough_cont_[i][k] = cv::Point(pyramid_rough_cont_[i - 1][k].x, pyramid_rough_cont_[i - 1][k].y);
+	}
+}
+
+
 void Tracking::build_mask(const cv::Mat& frame)
 {
 	frame.copyTo(frame_);
 	frame.copyTo(illustration);
-	d_map_ = cv::Mat(frame_.size(), CV_8UC1);
+	d_map_ = cv::Mat(frame_.size(), CV_8UC1, cv::Scalar(0));
 	
-	// Convex Hull.
-	std::vector<cv::Point> hull(rough_selection_.size());
-	mask_ = cv::Mat(frame.size(), CV_8UC1, cv::Scalar(0));
-	cv::convexHull(rough_selection_, hull, false);
+	init();
+	frame_ = pyramid_image_[4];
+	d_map_ = dissimilarity_piramid_[4];
+	illustration = pyramid_image_[4];
 	
-	selection_refinement(hull);
+	mask_ = cv::Mat(frame_.size(), CV_8UC1, cv::Scalar(0));
+	
+	int kernel_size = 11;
+	cv::Mat3f tmp_img(frame_);
+	cv::GaussianBlur(tmp_img, gauss_img_, cv::Size(kernel_size, kernel_size), 0, 0);
+	//cv::medianBlur(tmp_img, gauss_img_, 5);
+	//cv::bilateralFilter(tmp_img, gauss_img_, -1, -1, -1);
+	cv::imshow("Blur", cv::Mat3b(gauss_img_));
+	cv::waitKey(0);
+	
+	selection_refinement(pyramid_rough_cont_[4]);
+	dissimilarity_piramid_[4] = d_map_;
+	dissimilarity_scaling_up();
+	dissimilarity_piramid_[0].copyTo(mask_);
+
+	// Post treatment.
+	int largest_area=0;
+    int largest_contour_index=0;
+
+    std::vector<std::vector<cv::Point>> contours; // Vector for storing contour
+    std::vector<cv::Vec4i> hierarchy;
+
+    findContours(mask_, contours, hierarchy,CV_RETR_CCOMP, CV_CHAIN_APPROX_SIMPLE );
+	for (int i = 0; i< contours.size(); i++ )
+	{
+        double a = contourArea(contours[i], false);
+        if(a > largest_area)
+		{
+            largest_area = a;
+            largest_contour_index = i;
+        }
+    }
+	mask_ = cv::Mat(mask_.size(), CV_8UC1, cv::Scalar(0));
+
+	cv::drawContours(mask_, contours, largest_contour_index, cv::Scalar(255), CV_FILLED, 8, hierarchy);
+	cv::dilate(mask_, mask_, cv::Mat(), cv::Point(-1,-1), 3);
+	// End post.
+	// Print the result.
+
+	illustration = pyramid_image_[0];
+	for (unsigned int i = 0; i < pyramid_image_[0].rows; ++i)
+	{
+		for (unsigned int j = 0; j < pyramid_image_[0].cols; ++j)
+		{
+			if (mask_.at<uchar>(i, j) == 255)
+			{
+				illustration.at<cv::Vec3b>(i, j) = cv::Vec3b(0, 0, 255);
+			}
+		}
+	}
+	cv::imshow("final", illustration);
+	cv::waitKey(0);
+
 }
 
 
