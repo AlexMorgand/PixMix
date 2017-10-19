@@ -414,8 +414,8 @@ void Tracking::build_mask(const cv::Mat& frame)
         }
     }
 	mask_ = cv::Mat(mask_.size(), CV_8UC1, cv::Scalar(0));
-
-	cv::drawContours(mask_, contours, largest_contour_index, cv::Scalar(255), CV_FILLED, 8, hierarchy);
+	
+	cv::drawContours(mask_, contours, largest_contour_index, cv::Scalar(255), -1);
 	cv::dilate(mask_, mask_, cv::Mat(), cv::Point(-1,-1), 3);
 	// End post.
 	// Print the result.
