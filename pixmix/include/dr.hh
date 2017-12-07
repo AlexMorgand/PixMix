@@ -39,6 +39,7 @@ class DR
 
     // From a binary mask, build the list of points.
     void build_mask();
+    void build_mask_coarse();
 
     // Basic cost comparing patches in the LAB colorspace.
     double cost_bullshit(cv::Point& p, double curr_cost, bool& stop);

@@ -1,5 +1,10 @@
 #include "dr.hh"
 
+bool in_image_border(unsigned x, unsigned y, cv::Mat& img)
+{
+	return (x == img.rows - 1 || x == 0 || y == img.cols - 1 || y == 0);
+}
+
 bool in_image(unsigned x, unsigned y, cv::Mat& img)
 {
 	return !(x >= img.rows || x < 0 || y >= img.cols || y < 0);
@@ -233,6 +238,139 @@ double DR::cost_bullshit(cv::Point& p, double curr_cost, bool& stop)
   return cost;
 }
 
+void DR::build_mask_coarse()
+{ 
+	scale_iter_ = 1;
+
+	size_t rows = pyramid_mask_[scale_iter_].rows;
+    size_t cols = pyramid_mask_[scale_iter_].cols;
+
+	// Do not duplicate the random.
+	cv::Mat used_pixels = pyramid_mask_[scale_iter_].clone();
+
+	// Init the border list.
+	std::vector<cv::Point> border;
+
+	cv::Mat illu;
+	pyramid_image_[scale_iter_].copyTo(illu);
+	
+    int x, y;
+
+    for (int i = 0; i < rows; ++i)
+    {
+        for (int j = 0; j < cols; ++j)
+        {
+            if (pyramid_mask_[scale_iter_].at<uchar>(i, j))
+            {
+                pyramid_target_pixels_[scale_iter_].push_back(cv::Point(i, j));
+
+				if (in_image_border(i, j, pyramid_mask_[scale_iter_]))
+				{
+					border.push_back(cv::Point(i, j));
+					illu.at<cv::Vec3b>(i, j) = cv::Vec3b(0, 0, 255);
+					used_pixels.at<uchar>(i, j) = 125;
+				}
+				else
+				{
+					int conv = -(pyramid_mask_[scale_iter_].at<uchar>(i, j-1) != 0) - (pyramid_mask_[scale_iter_].at<uchar>(i-1, j) != 0) - (pyramid_mask_[scale_iter_].at<uchar>(i+1, j) != 0) -
+								(pyramid_mask_[scale_iter_].at<uchar>(i, j+1) != 0) + (4 * (pyramid_mask_[scale_iter_].at<uchar>(i, j) != 0));
+					if (conv > 0)
+					{
+						border.push_back(cv::Point(i, j));
+						illu.at<cv::Vec3b>(i, j) = cv::Vec3b(0, 0, 255);
+						used_pixels.at<uchar>(i, j) = 125;
+					}
+				}
+			}
+			else
+				pyramid_mapping_[scale_iter_].at<cv::Point>(i, j) = cv::Point(0, 0);
+		}
+    }
+
+	unsigned int border_size = border.size();
+
+	do
+    {
+		unsigned int rand_border = rand() % border_size;
+		int x = border[rand_border].x, y = border[rand_border].y;
+		border.erase(border.begin() + rand_border);
+		--border_size;
+
+		// Dilate with pixels around the current border.
+		cv::Vec3i tmp(0, 0, 0);
+		used_pixels.at<uchar>(x, y) = 0;
+		int k = 0;
+		for (int i = -1; i <= 1; ++i)
+		{
+			for (int j = -1; j <= 1; ++j)
+			{
+				if (i != 0 || i != j)
+				{
+					if (!used_pixels.at<uchar>(x + i, y + j))
+					{
+						tmp += pyramid_image_[scale_iter_].at<cv::Vec3b>(x + i, y + j);
+						//std::cout << "adding " << pyramid_image_[scale_iter_].at<cv::Vec3b>(x + i, y + j) << " to " << tmp << std::endl;
+						++k;
+					}
+					else if (used_pixels.at<uchar>(x + i, y + j) == 255)
+					{
+						int conv = - (used_pixels.at<uchar>(x +i, y + j-1) == 255) - (used_pixels.at<uchar>(x +i-1, y + j) == 255) - (used_pixels.at<uchar>(x +i+1, y + j) == 255) -
+									(used_pixels.at<uchar>(x +i, y + j+1) == 255) + (4 * (used_pixels.at<uchar>(x +i, y + j) == 255));
+						if (conv > 0)
+						{
+							border.push_back(cv::Point(x + i, y + j));
+							used_pixels.at<uchar>(x + i, y + j) = 125;
+							++border_size;
+						}
+					}
+				}
+			}
+		}
+		pyramid_image_[scale_iter_].at<cv::Vec3b>(x, y)[0] = tmp[0] / k;
+		pyramid_image_[scale_iter_].at<cv::Vec3b>(x, y)[1] = tmp[1] / k;
+		pyramid_image_[scale_iter_].at<cv::Vec3b>(x, y)[2] = tmp[2] / k;
+    }
+	while (border_size);
+
+
+	cv::imshow("lol", pyramid_image_[scale_iter_]);
+	cv::waitKey(0);
+	
+	// Too expensive, can we do a random search or looking in the border only?
+	for (auto it = pyramid_target_pixels_[scale_iter_].begin(); it != pyramid_target_pixels_[scale_iter_].end(); ++it)
+	{
+		float cost_tmp = FLT_MAX;
+		cv::Vec3b cur = pyramid_image_[scale_iter_].at<cv::Vec3b>(it->x, it->y);
+		cv::Point choosen_one;
+		for (int i = 0; i < rows; ++i)
+		{
+			for (int j = 0; j < cols; ++j)
+			{
+				if (!pyramid_mask_[scale_iter_].at<uchar>(i, j))
+				{
+					cv::Vec3b tmp_cur = pyramid_image_[scale_iter_].at<cv::Vec3b>(i, j);
+					float cost = abs(tmp_cur[0] - cur[0]) + abs(tmp_cur[1] - cur[1]) + abs(tmp_cur[2] - cur[2]);
+					if (cost < cost_tmp)
+					{
+						cost_tmp = cost;
+						choosen_one = cv::Point(i, j);
+					}
+				}
+			}
+		}
+		cv::Point m = cv::Point(choosen_one.x - it->x, choosen_one.y - it->y);
+        pyramid_mapping_[scale_iter_].at<cv::Point>(it->x, it->y) = m;
+
+        patch_copy(cv::Point(it->x, it->y), cv::Point(m.x + it->x, m.y + it->y));
+        bool stop = false;
+		double max = INT_MAX;
+		pyramid_cost_[scale_iter_].at<float>(it->x, it->y) = cost_bullshit(*it, max/*cost_tmp*/, stop);
+
+	}
+	cv::imshow("final", pyramid_image_[scale_iter_]);
+	cv::waitKey(0);
+}
+
 void DR::build_mask()
 {
     size_t rows = pyramid_mask_[scale_iter_].rows;
@@ -279,7 +417,6 @@ void DR::build_mask()
         bool stop = false;
 		pyramid_cost_[scale_iter_].at<float>(it->x, it->y) = cost_bullshit(*it, max, stop);
     }
-    cv::waitKey(1);
 }
 
 void DR::patch_copy(cv::Point dst, cv::Point src)
@@ -548,6 +685,7 @@ void DR::inpaint()
 	  // At the lowest resolution, the init is completely random.
       if (scale_iter_ == max_scale_)
           // Init random.
+          //build_mask_coarse();
           build_mask();
       else
       {
