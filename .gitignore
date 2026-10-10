@@ -33,6 +33,10 @@
 
 # Build directory.
 build
+build*/
+
+# Local capture inputs and generated comparison videos.
+data/
 
 *.zip
 *.png
@@ -49,6 +53,7 @@ build
 *.mov
 *.json
 *.md
+!README.md
 *.tga
 *.mtl
 *.dae
@@ -57,3 +62,4 @@ build
 *.jpeg
 *.pdf
 *.txt
+!CMakeLists.txt
