@@ -14,27 +14,38 @@ inline bool offset_valid(const cv::Vec2i& offset) {
 // Unpublished PixMix thresholds are explicit here so they can be tuned without
 // hunting through the solver. Comments mark values that the thesis states.
 struct PixMixConfig {
-    // 5x5 SSD neighborhood (thesis).
+    // 5x5 SSD neighborhood on every pyramid level (thesis 4.16).
     int patch_radius = 2;
     // alpha * spatial + (1 - alpha) * appearance, alpha = 0.2 (thesis).
     float alpha = 0.2f;
-    // d_s = min(|f(p)+v - f(p+v)|^2, tau_s) in full-resolution pixels (thesis
-    // 4.12). Costs are raw: appearance is a mean per-pixel 3-channel SSD, so
-    // tau_s sets how much a seam between two source blocks may cost. The thesis
-    // does not publish the value.
-    float tau_s = 2000.f;
+    // The implemented spatial term is the minimum clamped neighbor
+    // disagreement, then weighted by 1/4 (thesis 4.61 and 4.12). Distances are
+    // full-resolution pixels. The thesis does not publish tau_s.
+    float tau_s = 4000.f;
     // Border samples whose neighborhood touches the source are up-weighted.
     // The thesis says tau_a >> 1 but does not give the constant.
     float tau_a = 8.f;
+    // Tie-break visually similar initialization patches toward local source
+    // material, which better preserves perspective scale.
+    float source_locality = 0.05f;
+    // 2010 paper section 5.3: when two source patches have similar appearance,
+    // keep the spatially nearer one so the fill does not jump to a distant
+    // copy. The value is a mean per-pixel SSD. Zero disables the preference.
+    float similar_appearance = 12.f;
     int max_pyramid_levels = 8;
     // Coarsest level keeps every hole pixel within this many pixels of the border.
     float coarse_border_px = 3.f;
     int still_passes = 5;
-    // Still layers keep iterating until fewer than 1% of mappings change.
-    int max_still_passes = 20;
+    // The thesis reports convergence below 3% after ten iterations.
+    int max_still_passes = 10;
+    // Optional full-resolution restart for thin grids. It is not part of the
+    // thesis pyramid, which upsamples the coarse mapping and refines it.
+    bool structural_candidate = false;
     // Forwarding the previous map is reported to cut iterations about 4x.
     int video_passes = 3;
-    int video_search_radius = 12;
+    // Zero follows PatchMatch/thesis 4.3 and starts each random search over
+    // the whole layer. A positive value is an explicit speed/quality override.
+    int video_search_radius = 0;
     int blend_radius = 4;
     // Extra pixels added around the selected hole so a cast shadow is removed
     // with the object. Zero keeps the fingerprint contour tight.

@@ -61,6 +61,7 @@ class PixMixPipeline {
     // Returns false only when the pipeline was not started or the frame is unusable.
     // A lost track still returns true, with stats.tracking_ok == false.
     bool process(const cv::Mat& bgr, FrameOutput& output);
+    const std::vector<ScaleView>& scales() const { return inpainter_.scales(); }
 
   private:
     bool finish_start(const cv::Mat& bgr,

@@ -23,6 +23,12 @@ cmake --build build -j
 ./build/pixmix --still photo.jpg --mask hole.png
 ```
 
+`tools/annotate.html` paints those masks in a browser. Open a folder of stills, draw the hole, and save. White pixels are removed. Chrome writes `photo_mask.png` next to the image; a second object on the same photo becomes `photo_mask_2.png`.
+
+```bash
+./build/pixmix --still photo.jpg --mask photo_mask.png --output photo_removed.png
+```
+
 Batch mode takes the selection polygon in source pixels, after any rotation:
 
 ```bash
@@ -33,6 +39,11 @@ Batch mode takes the selection polygon in source pixels, after any rotation:
 ```
 
 `--dilate N` grows the selected hole so cast shadows go with the object. `--no-correct` keeps the homography-warped contour and skips the fingerprint boundary correction, which can pull the contour open on cluttered backgrounds. OpenCV already applies the phone rotation tag when it decodes; `--rotate` is only for files that lack it.
+
+Solver experiments can override `--alpha`, `--tau-s`, `--tau-a`, and
+`--locality`. The optional full-resolution line-pattern restart is off; the
+pyramid keeps the upsampled mapping. Set `PIXMIX_PROFILE=1` to print phase
+timings and candidate selection to stderr.
 
 `--debug-output` writes a 2×2 panel per frame. The top left shows tracking: the hole in red, the warped contour in yellow, the corrected contour in green (red when lost), and RANSAC inliers in cyan and outliers in red. The top right is the output. The bottom left is the reference model the coherence term aims for. The bottom right is the offset map, where hue is the direction of f(p) − p; flat color regions are joined source blocks. The batch run also prints `mean_flicker`, the mean change inside the hole between the motion-compensated previous output and the current one, next to `background_flicker`, the same measure on a ring of real background.
 
@@ -58,15 +69,34 @@ A steady Release run of that benchmark here was about 25 FPS for a 13k-pixel hol
 Several constants are not numeric in the thesis and live in `include/config.hh`:
 
 - border weight `tau_a = 8`
-- spatial clamp `tau_s = 2000` on the squared offset difference, in full-resolution pixels (thesis eq. 4.12); costs are in raw units, with appearance as a mean per-pixel 3-channel SSD
-- still layers iterate until fewer than 1% of mappings change (at least 5, at most 20 passes)
-- video frames refine only the full-resolution layer, starting from the forwarded map, with 3 passes
-- video random-search radius of 12 pixels
+- spatial cost is the minimum clamped neighbor disagreement times `1/4` (thesis eq. 4.61), with `tau_s = 4000` in full-resolution pixels; appearance is the thesis eq. 4.13 sum divided by the neighborhood size and the number of valid samples
+- border pixels, including hole pixels within one 5×5 patch of the source, use `tau_a`; deeper hole pixels stay at weight 1 (thesis eq. 4.18)
+- every pyramid level uses a 5×5 color patch; the thesis timing setup used grayscale only on the finest layer, but its own color comparison shows that drops region boundaries
+- the coarsest level follows the thesis 3-pixel border rule, but not below 48 pixels on a side, matching the published elephant pyramid so thin lines are still visible to initialization
+- still layers iterate until fewer than 3% of mappings change (at least 5, at most 10 passes)
+- still images initialize only the coarsest level, by the thesis section 4.4.3 single-pixel patch shrink, ordered by structure crossing the border
+- each finer level upsamples a complete mapping and then refines all masked pixels; it does not restart an inward-growing border front
+- still and video both refine the complete adaptive pyramid; each video level considers both the projected forwarded map and the upsampled coarser map, with 3 passes
+- random search starts over the complete source image at every layer and halves to one pixel, as in thesis section 4.3; `--search-radius` is an explicit speed/quality override
+- 5×5 appearance patches by default; `--patch-size` permits controlled comparison with larger odd sizes
 - box-filter radii 8 and 2
 - 4-pixel boundary blend
 - fingerprint vote against color-cluster means, using the small-box RGB so a textured contour does not split into one cluster per sample
 
-Appearance (eq. 4.13) leaves out the center sample and only counts samples whose source lies in S. A candidate whose source window covers less than half of the known target neighborhood is rejected; otherwise windows clipped by the image border would look free. Coherence (eq. 5.16) compares the candidate's source window with the reference model, center included, and is added to the appearance cost (eq. 5.17).
+Appearance (eq. 4.13) leaves out the center sample and only counts samples whose source lies in S. Samples that lie in S, including the mask border, are read from the original frame and weighted by `tau_a`; samples already synthesized inside the hole keep weight 1. Every masked pixel is refined together from the upsampled mapping. A candidate whose source window covers less than half of the known target neighborhood is rejected; otherwise windows clipped by the image border would look free. Coherence (eq. 5.16) uses the same center-free neighborhood to compare the candidate's source window with the reference model and is added to the appearance cost (eq. 5.17).
+
+The regression suite always runs the regular texture and line-pattern cases with five fixed seeds. This catches both quality regressions and solutions that only succeed because of a lucky random search.
+
+`tools/evaluate_rord.py` evaluates the fixed five-image RORD subset (or all 50
+with `--all`) and writes machine-readable MAE, runtime, hole size, seed, and
+candidate choice. `--check` enforces the accepted quick-set quality and
+performance budget in `tools/rord_quick_baseline.json`.
+
+```bash
+python3 tools/evaluate_rord.py --check
+python3 tools/evaluate_rord.py --all --output data/rord50/removed_corrected \
+    --json data/rord50/corrected.json
+```
 
 Selection runs once, at full resolution. Later frames only adjust the contour.
 

@@ -36,6 +36,34 @@ void paint_texture(cv::Mat& image) {
     }
 }
 
+void paint_regression_texture(cv::Mat& image) {
+    for (int y = 0; y < image.rows; ++y) {
+        cv::Vec3b* row = image.ptr<cv::Vec3b>(y);
+        for (int x = 0; x < image.cols; ++x) {
+            const int checker = ((x / 8) & 1) ^ ((y / 8) & 1);
+            const int shade = 40 + 90 * checker + (x % 8) + (y % 5);
+            row[x] = cv::Vec3b(static_cast<uchar>(shade), static_cast<uchar>(shade / 2 + 30),
+                               static_cast<uchar>(80 + ((x + y) / 17) % 40));
+        }
+    }
+}
+
+void paint_regression_lines(cv::Mat& image) {
+    for (int y = 0; y < image.rows; ++y) {
+        cv::Vec3b* row = image.ptr<cv::Vec3b>(y);
+        for (int x = 0; x < image.cols; ++x) {
+            const int grain = (x * 3 + y * 7) % 17;
+            row[x] = cv::Vec3b(static_cast<uchar>(180 + grain), static_cast<uchar>(150 + grain / 2), 110);
+        }
+    }
+    for (int x = 12; x < image.cols; x += 22) {
+        cv::line(image, cv::Point(x, 0), cv::Point(x + 9, image.rows - 1), cv::Scalar(90, 70, 50), 2);
+    }
+    for (int y = 10; y < image.rows; y += 20) {
+        cv::line(image, cv::Point(0, y), cv::Point(image.cols - 1, y + 5), cv::Scalar(120, 100, 75), 2);
+    }
+}
+
 double mae(const cv::Mat& output, const cv::Mat& truth, const cv::Mat& region) {
     double error = 0.0;
     int count = 0;
@@ -164,16 +192,73 @@ void test_inpaint_and_selection() {
 
     pixmix::PixMixInpainter inpainter(config);
     const cv::Mat filled = inpainter.run(shown, truth_mask);
+    EXPECT(inpainter.levels_used() >= 3);
     EXPECT(invalid_sources(truth_mask, inpainter.mapping()) == 0);
     cv::Mat interior;
     cv::erode(truth_mask, interior, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(11, 11)));
     const double error = mae(filled, clean, interior);
     std::cout << "inpaint mae=" << error << "\n";
-    EXPECT(error < 25.0);
-    if (error >= 25.0) {
+    EXPECT(error < 10.0);
+    const cv::Mat forwarded = inpainter.mapping().clone();
+    const cv::Mat video_filled = inpainter.run(shown, truth_mask, forwarded, filled, config.video_passes);
+    EXPECT(inpainter.levels_used() >= 3);
+    EXPECT(invalid_sources(truth_mask, inpainter.mapping()) == 0);
+    EXPECT(mae(video_filled, clean, interior) < 10.0);
+    if (error >= 10.0) {
         cv::imwrite("pixmix_test_inpaint.png", filled);
         cv::imwrite("pixmix_test_clean.png", clean);
     }
+}
+
+void test_border_lines() {
+    constexpr int width = 192;
+    constexpr int height = 144;
+    cv::Mat clean(height, width, CV_8UC3);
+    paint_regression_lines(clean);
+    cv::Mat shown = clean.clone();
+    const cv::Rect object(64, 48, 64, 48);
+    cv::rectangle(shown, object, cv::Scalar(20, 90, 200), cv::FILLED);
+    cv::Mat mask(clean.size(), CV_8U, cv::Scalar(0));
+    cv::rectangle(mask, object, cv::Scalar(255), cv::FILLED);
+
+    cv::Mat interior;
+    cv::erode(mask, interior, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5)));
+    double worst = 0.0;
+    for (unsigned seed = 1; seed <= 5; ++seed) {
+        pixmix::PixMixConfig config;
+        config.seed = seed;
+        pixmix::PixMixInpainter inpainter(config);
+        const cv::Mat filled = inpainter.run(shown, mask);
+        const double error = mae(filled, clean, interior);
+        worst = std::max(worst, error);
+        EXPECT(error < 12.0);
+    }
+    std::cout << "lines five-seed worst mae=" << worst << "\n";
+}
+
+void test_texture_seeds() {
+    constexpr int width = 192;
+    constexpr int height = 144;
+    cv::Mat clean(height, width, CV_8UC3);
+    paint_regression_texture(clean);
+    cv::Mat shown = clean.clone();
+    const cv::Rect object(64, 44, 68, 56);
+    cv::rectangle(shown, object, cv::Scalar(20, 220, 240), cv::FILLED);
+    cv::Mat mask(clean.size(), CV_8U, cv::Scalar(0));
+    cv::rectangle(mask, object, cv::Scalar(255), cv::FILLED);
+    cv::Mat interior;
+    cv::erode(mask, interior, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5)));
+    double worst = 0.0;
+    for (unsigned seed = 1; seed <= 5; ++seed) {
+        pixmix::PixMixConfig config;
+        config.seed = seed;
+        pixmix::PixMixInpainter inpainter(config);
+        const cv::Mat filled = inpainter.run(shown, mask);
+        const double error = mae(filled, clean, interior);
+        worst = std::max(worst, error);
+        EXPECT(error < 3.0);
+    }
+    std::cout << "texture five-seed worst mae=" << worst << "\n";
 }
 
 void test_video_coherence() {
@@ -212,11 +297,11 @@ void test_video_coherence() {
     cv::erode(truth_mask, interior, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(9, 9)));
     const double error = mae(second.image, truth1, interior);
     std::cout << "video mae=" << error << " total_ms=" << second.stats.total_ms << "\n";
-    EXPECT(error < 30.0);
+    EXPECT(error < 10.0);
     const double first_error = mae(first.image, truth0, mask0);
     std::cout << "first mae=" << first_error << "\n";
-    EXPECT(first_error < 30.0);
-    if (error >= 30.0 || overlap <= 0.7) {
+    EXPECT(first_error < 10.0);
+    if (error >= 10.0 || overlap <= 0.7) {
         cv::imwrite("pixmix_test_frame1.png", second.image);
         cv::imwrite("pixmix_test_mask1.png", second.mask);
     }
@@ -268,6 +353,8 @@ int main() {
     test_rotation();
     test_forward_translation();
     test_inpaint_and_selection();
+    test_border_lines();
+    test_texture_seeds();
     test_video_coherence();
     test_tracking_loss_recovers();
     if (g_failures != 0) {

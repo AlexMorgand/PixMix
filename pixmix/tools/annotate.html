@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PixMix mask annotator</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14120f;
+    --panel: #1e1b17;
+    --line: #3a342c;
+    --text: #f3efe6;
+    --muted: #b3a898;
+    --accent: #e23b2f;
+    --ok: #8fbf7a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 "Segoe UI", sans-serif;
+  }
+  header, aside, .stage { background: var(--panel); }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 16px; font-weight: 650; margin: 0; }
+  header p { margin: 0; color: var(--muted); }
+  .workspace {
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr) 300px;
+    min-height: 0;
+  }
+  aside { min-height: 0; overflow: auto; padding: 12px; }
+  aside.files { border-right: 1px solid var(--line); }
+  aside.tools { border-left: 1px solid var(--line); }
+  button, .file-button {
+    font: inherit;
+    color: var(--text);
+    background: #2a261f;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 7px 10px;
+    cursor: pointer;
+  }
+  button:hover, .file-button:hover { border-color: #6d6254; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: white; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .stack { display: grid; gap: 8px; }
+  label.slider { display: grid; gap: 4px; color: var(--muted); }
+  input[type="range"] { width: 100%; }
+  .stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #0c0b09; }
+  canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  .empty {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    color: var(--muted); text-align: center; padding: 24px;
+    pointer-events: none;
+  }
+  .empty[hidden] { display: none; }
+  .file-button {
+    width: 100%;
+    display: flex; justify-content: space-between; gap: 8px;
+    text-align: left; margin: 0 0 6px;
+  }
+  .file-button.active { border-color: var(--accent); }
+  .mark { color: var(--ok); }
+  .dirty { color: var(--accent); }
+  .layers { display: grid; gap: 6px; }
+  .layer {
+    display: grid;
+    grid-template-columns: 14px 1fr auto auto;
+    gap: 6px; align-items: center;
+    padding: 4px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+  }
+  .layer.active { border-color: var(--line); background: #2a261f; }
+  .swatch { width: 14px; height: 14px; border-radius: 50%; }
+  .hint, .status, .datasets { color: var(--muted); overflow-wrap: anywhere; }
+  .datasets a { color: #f0c7a2; }
+  .datasets h2 { color: var(--text); font-size: 13px; margin: 14px 0 6px; }
+  .datasets p { margin: 0 0 8px; }
+  kbd {
+    font: 12px ui-monospace, monospace;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+  .drop {
+    outline: 2px dashed var(--accent);
+    outline-offset: -8px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>PixMix masks</h1>
+  <p>White pixels are the hole. Include a little background around the object.</p>
+</header>
+<div class="workspace">
+  <aside class="files">
+    <div class="stack">
+      <button id="open-files" type="button">Open images</button>
+      <button id="open-folder" type="button">Open folder</button>
+      <button id="practice" type="button">Practice image</button>
+      <input id="file-input" type="file" accept="image/*" multiple hidden>
+      <input id="folder-input" type="file" accept="image/*" webkitdirectory multiple hidden>
+    </div>
+    <div id="file-list" style="margin-top: 12px"></div>
+  </aside>
+  <div class="stage" id="stage">
+    <canvas id="view"></canvas>
+    <div class="empty" id="empty">Drop images here, or open a folder of stills.</div>
+  </div>
+  <aside class="tools">
+    <div class="stack">
+      <div class="row" role="group" aria-label="Tool">
+        <button id="tool-brush" type="button" aria-pressed="true">Brush</button>
+        <button id="tool-eraser" type="button" aria-pressed="false">Eraser</button>
+        <button id="tool-polygon" type="button" aria-pressed="false">Polygon</button>
+        <button id="tool-pan" type="button" aria-pressed="false">Pan</button>
+      </div>
+      <label class="slider">Brush size <span id="size-value">28</span>
+        <input id="brush-size" type="range" min="2" max="160" value="28">
+      </label>
+      <label class="slider">Overlay <span id="opacity-value">50%</span>
+        <input id="opacity" type="range" min="15" max="85" value="50">
+      </label>
+      <div class="row">
+        <button id="undo" type="button">Undo</button>
+        <button id="redo" type="button">Redo</button>
+        <button id="clear-layer" type="button">Clear</button>
+        <button id="fit" type="button">Fit</button>
+      </div>
+      <div class="layers" id="layers"></div>
+      <button id="add-layer" type="button">Add another mask</button>
+      <button id="save" class="primary" type="button">Save masks</button>
+      <p class="status" id="status">No image yet.</p>
+      <p class="hint">
+        <kbd>B</kbd> brush <kbd>E</kbd> eraser <kbd>P</kbd> polygon <kbd>H</kbd> pan.
+        <kbd>[</kbd> <kbd>]</kbd> size. Wheel zooms. <kbd>Enter</kbd> closes a polygon.
+        <kbd>Ctrl</kbd>+<kbd>S</kbd> saves. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes.
+      </p>
+      <div class="datasets">
+        <h2>Images worth annotating</h2>
+        <p><a href="https://github.com/Forty-lock/RORD" target="_blank" rel="noreferrer">RORD</a> is the closest set: a real object, then the same photo with that object gone. The low-resolution pack is 960×540 on the Drive folder linked from the repo. The full set is hundreds of gigabytes.</p>
+        <p><a href="https://data.vision.ee.ethz.ch/csergi/share/davis/DAVIS-2017-trainval-480p.zip">DAVIS 2017 train/val, 480p</a> is about 800 MB and already has a mask on every frame. Use it for video, and keep clips on a road, wall, or floor: <code>bus</code>, <code>car-shadow</code>, <code>scooter-black</code>, <code>soapbox</code>, <code>train</code>. Check the DAVIS terms before redistributing it.</p>
+        <p><a href="https://commons.wikimedia.org/wiki/Category:Brick_pavements" target="_blank" rel="noreferrer">Wikimedia brick, tile, fabric, and grid photos</a> are the right stills for the fill itself: one object, with the same pattern continuing around it.</p>
+      </div>
+    </div>
+  </aside>
+</div>
+<script>
+const COLORS = ["#e23b2f", "#3d9ee2", "#3dbe6e", "#e2a23d", "#bf5af2"];
+const view = document.getElementById("view");
+const ctx = view.getContext("2d");
+const stage = document.getElementById("stage");
+const empty = document.getElementById("empty");
+const statusEl = document.getElementById("status");
+const fileList = document.getElementById("file-list");
+const layerList = document.getElementById("layers");
+
+const state = {
+  items: [],
+  current: -1,
+  tool: "brush",
+  brush: 28,
+  opacity: 0.5,
+  view: { scale: 1, x: 0, y: 0 },
+  drawing: false,
+  panning: false,
+  space: false,
+  last: null,
+  panLast: null,
+  polygon: [],
+  hover: null,
+  cursor: null,
+  directory: null,
+};
+
+function $(id) { return document.getElementById(id); }
+
+function setStatus(text) { statusEl.textContent = text; }
+
+function stemOf(name) { return name.replace(/\.[^.]+$/i, ""); }
+
+function maskInfo(name) {
+  const match = name.match(/^(.*)_mask(?:_(\d+))?\.png$/i);
+  if (!match) return null;
+  return { stem: match[1], index: match[2] ? Number(match[2]) : 1 };
+}
+
+function isImage(name) {
+  return /\.(png|jpe?g|webp|bmp)$/i.test(name) && !maskInfo(name);
+}
+
+function resizeView() {
+  const rect = stage.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  view.width = Math.max(1, Math.round(rect.width * dpr));
+  view.height = Math.max(1, Math.round(rect.height * dpr));
+  render();
+}
+
+function item() { return state.items[state.current] || null; }
+
+function activeLayer() {
+  const current = item();
+  return current ? current.layers[current.active] : null;
+}
+
+function makeLayer(width, height, color) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const layerCtx = canvas.getContext("2d", { willReadFrequently: true });
+  return { canvas, ctx: layerCtx, color, visible: true };
+}
+
+function newItem(name, bitmap) {
+  return {
+    name,
+    stem: stemOf(name),
+    bitmap,
+    width: bitmap.width,
+    height: bitmap.height,
+    layers: [makeLayer(bitmap.width, bitmap.height, COLORS[0])],
+    active: 0,
+    undo: [],
+    redo: [],
+    dirty: false,
+    hasMask: false,
+    file: null,
+    handle: null,
+  };
+}
+
+function fit() {
+  const current = item();
+  if (!current) return;
+  const margin = 32 * (window.devicePixelRatio || 1);
+  const scale = Math.min(
+    (view.width - margin) / current.width,
+    (view.height - margin) / current.height
+  );
+  state.view.scale = Math.max(0.02, scale);
+  state.view.x = (view.width - current.width * state.view.scale) / 2;
+  state.view.y = (view.height - current.height * state.view.scale) / 2;
+  render();
+}
+
+function canvasPoint(event) {
+  const rect = view.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * (view.width / rect.width),
+    y: (event.clientY - rect.top) * (view.height / rect.height),
+  };
+}
+
+function imagePoint(event) {
+  const point = canvasPoint(event);
+  return {
+    x: (point.x - state.view.x) / state.view.scale,
+    y: (point.y - state.view.y) / state.view.scale,
+  };
+}
+
+function insideImage(point) {
+  const current = item();
+  return current && point.x >= 0 && point.y >= 0 && point.x < current.width && point.y < current.height;
+}
+
+function snapshot() {
+  const current = item();
+  const layer = activeLayer();
+  if (!current || !layer) return;
+  current.undo.push({
+    index: current.active,
+    data: layer.ctx.getImageData(0, 0, layer.canvas.width, layer.canvas.height),
+  });
+  if (current.undo.length > 8) current.undo.shift();
+  current.redo = [];
+  current.dirty = true;
+}
+
+function restore(entry) {
+  const current = item();
+  if (!current || !entry) return;
+  const layer = current.layers[entry.index];
+  if (!layer) return;
+  layer.ctx.putImageData(entry.data, 0, 0);
+  current.active = entry.index;
+  current.dirty = true;
+}
+
+function undo() {
+  const current = item();
+  const layer = activeLayer();
+  if (!current || !layer || current.undo.length === 0) return;
+  current.redo.push({
+    index: current.active,
+    data: layer.ctx.getImageData(0, 0, layer.canvas.width, layer.canvas.height),
+  });
+  restore(current.undo.pop());
+  refresh();
+}
+
+function redo() {
+  const current = item();
+  const layer = activeLayer();
+  if (!current || !layer || current.redo.length === 0) return;
+  current.undo.push({
+    index: current.active,
+    data: layer.ctx.getImageData(0, 0, layer.canvas.width, layer.canvas.height),
+  });
+  restore(current.redo.pop());
+  refresh();
+}
+
+function holeCount(layer) {
+  const data = layer.ctx.getImageData(0, 0, layer.canvas.width, layer.canvas.height).data;
+  let count = 0;
+  for (let i = 3; i < data.length; i += 4) if (data[i] > 127) count += 1;
+  return count;
+}
+
+function stamp(layer, point, erase) {
+  const radius = state.brush / 2;
+  layer.ctx.save();
+  layer.ctx.globalCompositeOperation = erase ? "destination-out" : "source-over";
+  layer.ctx.fillStyle = "#fff";
+  layer.ctx.beginPath();
+  layer.ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+  layer.ctx.fill();
+  layer.ctx.restore();
+}
+
+function strokeTo(point) {
+  const layer = activeLayer();
+  if (!layer || !state.last) return;
+  const distance = Math.hypot(point.x - state.last.x, point.y - state.last.y);
+  const step = Math.max(1, state.brush / 4);
+  const count = Math.max(1, Math.ceil(distance / step));
+  for (let i = 1; i <= count; i += 1) {
+    const t = i / count;
+    stamp(layer, {
+      x: state.last.x + (point.x - state.last.x) * t,
+      y: state.last.y + (point.y - state.last.y) * t,
+    }, state.tool === "eraser");
+  }
+  state.last = point;
+}
+
+function closePolygon() {
+  const layer = activeLayer();
+  if (!layer || state.polygon.length < 3) return;
+  snapshot();
+  layer.ctx.save();
+  layer.ctx.globalCompositeOperation = state.tool === "eraser" ? "destination-out" : "source-over";
+  layer.ctx.fillStyle = "#fff";
+  layer.ctx.beginPath();
+  state.polygon.forEach((point, index) => {
+    if (index === 0) layer.ctx.moveTo(point.x, point.y);
+    else layer.ctx.lineTo(point.x, point.y);
+  });
+  layer.ctx.closePath();
+  layer.ctx.fill();
+  layer.ctx.restore();
+  state.polygon = [];
+  refresh();
+}
+
+function render() {
+  ctx.clearRect(0, 0, view.width, view.height);
+  const current = item();
+  if (!current) return;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(
+    current.bitmap,
+    state.view.x,
+    state.view.y,
+    current.width * state.view.scale,
+    current.height * state.view.scale
+  );
+  for (const layer of current.layers) {
+    if (!layer.visible) continue;
+    tint(layer);
+  }
+  if (state.polygon.length > 0) drawPolygon();
+  if (state.cursor && (state.tool === "brush" || state.tool === "eraser")) drawCursor();
+}
+
+function tint(layer) {
+  const scratch = tint.canvas || (tint.canvas = document.createElement("canvas"));
+  if (scratch.width !== view.width || scratch.height !== view.height) {
+    scratch.width = view.width;
+    scratch.height = view.height;
+  }
+  const scratchCtx = scratch.getContext("2d");
+  scratchCtx.clearRect(0, 0, scratch.width, scratch.height);
+  scratchCtx.drawImage(
+    layer.canvas,
+    state.view.x,
+    state.view.y,
+    layer.canvas.width * state.view.scale,
+    layer.canvas.height * state.view.scale
+  );
+  scratchCtx.globalCompositeOperation = "source-in";
+  scratchCtx.fillStyle = layer.color;
+  scratchCtx.fillRect(0, 0, scratch.width, scratch.height);
+  scratchCtx.globalCompositeOperation = "source-over";
+  ctx.save();
+  ctx.globalAlpha = state.opacity;
+  ctx.drawImage(scratch, 0, 0);
+  ctx.restore();
+}
+
+function drawPolygon() {
+  ctx.save();
+  ctx.strokeStyle = activeLayer()?.color || "#fff";
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  state.polygon.forEach((point, index) => {
+    const x = state.view.x + point.x * state.view.scale;
+    const y = state.view.y + point.y * state.view.scale;
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  if (state.hover) ctx.lineTo(state.view.x + state.hover.x * state.view.scale, state.view.y + state.hover.y * state.view.scale);
+  ctx.stroke();
+  for (const point of state.polygon) {
+    ctx.beginPath();
+    ctx.arc(state.view.x + point.x * state.view.scale, state.view.y + point.y * state.view.scale, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawCursor() {
+  ctx.save();
+  ctx.strokeStyle = "white";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(state.cursor.x, state.cursor.y, (state.brush / 2) * state.view.scale, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderFiles() {
+  fileList.innerHTML = "";
+  state.items.forEach((entry, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "file-button" + (index === state.current ? " active" : "");
+    const label = document.createElement("span");
+    label.textContent = entry.name;
+    const flag = document.createElement("span");
+    flag.className = entry.dirty ? "dirty" : "mark";
+    flag.textContent = entry.dirty ? "●" : entry.hasMask ? "✓" : "";
+    button.append(label, flag);
+    button.addEventListener("click", () => selectItem(index));
+    fileList.append(button);
+  });
+  empty.hidden = state.items.length > 0;
+}
+
+function renderLayers() {
+  layerList.innerHTML = "";
+  const current = item();
+  if (!current) return;
+  current.layers.forEach((layer, index) => {
+    const row = document.createElement("div");
+    row.className = "layer" + (index === current.active ? " active" : "");
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = layer.color;
+    const name = document.createElement("button");
+    name.type = "button";
+    name.textContent = index === 0 ? "Mask" : "Mask " + (index + 1);
+    name.addEventListener("click", () => { current.active = index; state.polygon = []; refresh(); });
+    const eye = document.createElement("button");
+    eye.type = "button";
+    eye.textContent = layer.visible ? "Hide" : "Show";
+    eye.addEventListener("click", () => { layer.visible = !layer.visible; refresh(); });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.disabled = current.layers.length === 1;
+    remove.addEventListener("click", () => {
+      if (current.layers.length === 1) return;
+      current.layers.splice(index, 1);
+      current.active = Math.min(current.active, current.layers.length - 1);
+      current.dirty = true;
+      refresh();
+    });
+    row.append(swatch, name, eye, remove);
+    layerList.append(row);
+  });
+}
+
+function updateStatus() {
+  const current = item();
+  if (!current) { setStatus("No image yet."); return; }
+  const counts = current.layers.map(holeCount);
+  const names = counts.map((count, index) => {
+    const suffix = index === 0 ? "_mask.png" : "_mask_" + (index + 1) + ".png";
+    return count > 0 ? current.stem + suffix + " (" + count + " px)" : "";
+  }).filter(Boolean);
+  const zoom = Math.round(state.view.scale / (window.devicePixelRatio || 1) * 100);
+  setStatus(current.width + "×" + current.height + " · " + zoom + "% · " + (names.join(", ") || "mask is empty"));
+}
+
+function refresh() {
+  render();
+  renderFiles();
+  renderLayers();
+  updateStatus();
+}
+
+function selectItem(index) {
+  state.current = index;
+  state.polygon = [];
+  state.drawing = false;
+  fit();
+  refresh();
+}
+
+async function bitmapFrom(source) {
+  if (source instanceof ImageBitmap) return source;
+  return createImageBitmap(source);
+}
+
+async function addImage(name, source, extras = {}) {
+  if (!isImage(name)) return null;
+  const existing = state.items.find((entry) => entry.name === name);
+  if (existing) return existing;
+  const bitmap = await bitmapFrom(source);
+  const entry = newItem(name, bitmap);
+  Object.assign(entry, extras);
+  state.items.push(entry);
+  return entry;
+}
+
+async function paintMaskFile(entry, file, index) {
+  while (entry.layers.length < index) {
+    entry.layers.push(makeLayer(entry.width, entry.height, COLORS[entry.layers.length % COLORS.length]));
+  }
+  const layer = entry.layers[index - 1];
+  const bitmap = await createImageBitmap(file);
+  layer.ctx.drawImage(bitmap, 0, 0, entry.width, entry.height);
+  const pixels = layer.ctx.getImageData(0, 0, entry.width, entry.height);
+  const data = pixels.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const on = data[i] > 127;
+    data[i] = data[i + 1] = data[i + 2] = on ? 255 : 0;
+    data[i + 3] = on ? 255 : 0;
+  }
+  layer.ctx.putImageData(pixels, 0, 0);
+  bitmap.close();
+  entry.hasMask = true;
+}
+
+async function addFiles(files, handlesByName = null) {
+  const list = [...files].filter((file) => /\.(png|jpe?g|webp|bmp)$/i.test(file.name));
+  const images = [];
+  const masks = [];
+  for (const file of list) {
+    const info = maskInfo(file.name);
+    if (info) masks.push({ file, info });
+    else if (isImage(file.name)) images.push(file);
+  }
+  for (const file of images) {
+    await addImage(file.name, file, { file, handle: handlesByName?.get(file.name) || null });
+  }
+  for (const mask of masks) {
+    const entry = state.items.find((candidate) => candidate.stem === mask.info.stem);
+    if (entry) await paintMaskFile(entry, mask.file, mask.info.index);
+  }
+  if (state.current < 0 && state.items.length > 0) state.current = 0;
+  fit();
+  refresh();
+}
+
+async function openDirectory() {
+  if (!window.showDirectoryPicker) {
+    $("folder-input").click();
+    return;
+  }
+  const directory = await window.showDirectoryPicker({ mode: "readwrite" });
+  state.directory = directory;
+  const files = [];
+  const handles = new Map();
+  for await (const [name, handle] of directory.entries()) {
+    if (handle.kind !== "file" || !/\.(png|jpe?g|webp|bmp)$/i.test(name)) continue;
+    const file = await handle.getFile();
+    files.push(file);
+    handles.set(name, handle);
+  }
+  await addFiles(files, handles);
+  setStatus("Folder open. Save writes the mask next to the image.");
+}
+
+function setTool(tool) {
+  state.tool = tool;
+  state.polygon = [];
+  for (const name of ["brush", "eraser", "polygon", "pan"]) {
+    $("tool-" + name).setAttribute("aria-pressed", String(name === tool));
+  }
+  view.style.cursor = tool === "pan" ? "grab" : "crosshair";
+  render();
+}
+
+function maskBlob(layer) {
+  const out = document.createElement("canvas");
+  out.width = layer.canvas.width;
+  out.height = layer.canvas.height;
+  const outCtx = out.getContext("2d");
+  outCtx.fillStyle = "#000";
+  outCtx.fillRect(0, 0, out.width, out.height);
+  const src = layer.ctx.getImageData(0, 0, out.width, out.height);
+  const dst = outCtx.getImageData(0, 0, out.width, out.height);
+  for (let i = 0; i < src.data.length; i += 4) {
+    const on = src.data[i + 3] > 127 ? 255 : 0;
+    dst.data[i] = dst.data[i + 1] = dst.data[i + 2] = on;
+    dst.data[i + 3] = 255;
+  }
+  outCtx.putImageData(dst, 0, 0);
+  return new Promise((resolve) => out.toBlob(resolve, "image/png"));
+}
+
+function downloadBlob(blob, name) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+async function saveMasks() {
+  const current = item();
+  if (!current) return;
+  const painted = current.layers
+    .map((layer) => ({ layer, count: holeCount(layer) }))
+    .filter((entry) => entry.count > 0);
+  if (painted.length === 0) {
+    setStatus("Paint a mask before saving.");
+    return;
+  }
+  const written = [];
+  for (let index = 0; index < painted.length; index += 1) {
+    const name = current.stem + (index === 0 ? "_mask.png" : "_mask_" + (index + 1) + ".png");
+    const blob = await maskBlob(painted[index].layer);
+    if (state.directory) {
+      const handle = await state.directory.getFileHandle(name, { create: true });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+    } else {
+      downloadBlob(blob, name);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    written.push(name);
+  }
+  current.dirty = false;
+  current.hasMask = true;
+  refresh();
+  const command = "./build/pixmix --still " + current.name + " --mask " + written[0] + " --output " + current.stem + "_removed.png";
+  setStatus("Saved " + written.join(", ") + ". " + command);
+}
+
+view.addEventListener("pointerdown", (event) => {
+  const current = item();
+  if (!current) return;
+  try { view.setPointerCapture(event.pointerId); } catch (_) {}
+  const point = imagePoint(event);
+  state.cursor = canvasPoint(event);
+  if (state.space || state.tool === "pan" || event.button === 1) {
+    state.panning = true;
+    state.panLast = canvasPoint(event);
+    return;
+  }
+  if (!insideImage(point)) return;
+  if (state.tool === "polygon") {
+    const first = state.polygon[0];
+    const closeEnough = first && state.polygon.length >= 3 &&
+      Math.hypot(point.x - first.x, point.y - first.y) * state.view.scale < 10;
+    if (closeEnough) closePolygon();
+    else state.polygon.push(point);
+    render();
+    return;
+  }
+  snapshot();
+  state.drawing = true;
+  state.last = point;
+  stamp(activeLayer(), point, state.tool === "eraser");
+  render();
+});
+
+view.addEventListener("pointermove", (event) => {
+  state.cursor = canvasPoint(event);
+  if (state.panning && state.panLast) {
+    const point = canvasPoint(event);
+    state.view.x += point.x - state.panLast.x;
+    state.view.y += point.y - state.panLast.y;
+    state.panLast = point;
+    render();
+    return;
+  }
+  const point = imagePoint(event);
+  state.hover = point;
+  if (state.drawing && insideImage(point)) strokeTo(point);
+  render();
+});
+
+view.addEventListener("pointerup", () => {
+  state.drawing = false;
+  state.panning = false;
+  state.last = null;
+  if (item()) updateStatus();
+  renderFiles();
+});
+
+view.addEventListener("pointerleave", () => { state.cursor = null; render(); });
+view.addEventListener("contextmenu", (event) => event.preventDefault());
+view.addEventListener("wheel", (event) => {
+  if (!item()) return;
+  event.preventDefault();
+  const old = state.view.scale;
+  const next = Math.min(40, Math.max(0.05, old * (event.deltaY < 0 ? 1.12 : 1 / 1.12)));
+  const point = canvasPoint(event);
+  state.view.x = point.x - (point.x - state.view.x) * (next / old);
+  state.view.y = point.y - (point.y - state.view.y) * (next / old);
+  state.view.scale = next;
+  updateStatus();
+  render();
+}, { passive: false });
+
+window.addEventListener("keydown", (event) => {
+  const typing = event.target instanceof Element && event.target.matches("input, textarea");
+  if (event.key === " " && !typing) { state.space = true; event.preventDefault(); }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    saveMasks();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+    event.preventDefault();
+    if (event.shiftKey) redo(); else undo();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); return; }
+  if (typing) return;
+  if (event.key.toLowerCase() === "b") setTool("brush");
+  if (event.key.toLowerCase() === "e") setTool("eraser");
+  if (event.key.toLowerCase() === "p") setTool("polygon");
+  if (event.key.toLowerCase() === "h") setTool("pan");
+  if (event.key === "[") changeBrush(-4);
+  if (event.key === "]") changeBrush(4);
+  if (event.key === "Enter") closePolygon();
+  if (event.key === "Escape") { state.polygon = []; render(); }
+  if (event.key === "Backspace" && state.polygon.length > 0) {
+    event.preventDefault();
+    state.polygon.pop();
+    render();
+  }
+  if (event.key === "ArrowRight") selectRelative(1);
+  if (event.key === "ArrowLeft") selectRelative(-1);
+});
+window.addEventListener("keyup", (event) => { if (event.key === " ") state.space = false; });
+
+function changeBrush(delta) {
+  state.brush = Math.min(160, Math.max(2, state.brush + delta));
+  $("brush-size").value = String(state.brush);
+  $("size-value").textContent = String(state.brush);
+  render();
+}
+
+function selectRelative(delta) {
+  if (state.items.length === 0) return;
+  selectItem((state.current + delta + state.items.length) % state.items.length);
+}
+
+$("tool-brush").addEventListener("click", () => setTool("brush"));
+$("tool-eraser").addEventListener("click", () => setTool("eraser"));
+$("tool-polygon").addEventListener("click", () => setTool("polygon"));
+$("tool-pan").addEventListener("click", () => setTool("pan"));
+$("brush-size").addEventListener("input", (event) => {
+  state.brush = Number(event.target.value);
+  $("size-value").textContent = String(state.brush);
+  render();
+});
+$("opacity").addEventListener("input", (event) => {
+  state.opacity = Number(event.target.value) / 100;
+  $("opacity-value").textContent = event.target.value + "%";
+  render();
+});
+$("undo").addEventListener("click", undo);
+$("redo").addEventListener("click", redo);
+$("fit").addEventListener("click", fit);
+$("clear-layer").addEventListener("click", () => {
+  const layer = activeLayer();
+  if (!layer) return;
+  snapshot();
+  layer.ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+  refresh();
+});
+$("add-layer").addEventListener("click", () => {
+  const current = item();
+  if (!current) return;
+  current.layers.push(makeLayer(current.width, current.height, COLORS[current.layers.length % COLORS.length]));
+  current.active = current.layers.length - 1;
+  current.dirty = true;
+  state.polygon = [];
+  refresh();
+});
+$("save").addEventListener("click", saveMasks);
+$("open-files").addEventListener("click", () => $("file-input").click());
+$("open-folder").addEventListener("click", () => { openDirectory().catch((error) => setStatus(error.message)); });
+$("file-input").addEventListener("change", (event) => { addFiles(event.target.files); event.target.value = ""; });
+$("folder-input").addEventListener("change", (event) => {
+  const files = [...event.target.files].filter((file) => file.webkitRelativePath.split("/").length <= 2);
+  addFiles(files);
+  event.target.value = "";
+});
+$("practice").addEventListener("click", async () => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 640;
+  canvas.height = 480;
+  const pen = canvas.getContext("2d");
+  pen.fillStyle = "#c4b8a6";
+  pen.fillRect(0, 0, 640, 480);
+  pen.strokeStyle = "#6e6256";
+  pen.lineWidth = 3;
+  for (let y = 0; y <= 480; y += 28) {
+    pen.beginPath(); pen.moveTo(0, y); pen.lineTo(640, y); pen.stroke();
+  }
+  for (let x = 0; x <= 640; x += 56) {
+    pen.beginPath(); pen.moveTo(x, 0); pen.lineTo(x, 480); pen.stroke();
+  }
+  pen.fillStyle = "#241c16";
+  pen.beginPath();
+  pen.ellipse(330, 250, 78, 46, -0.3, 0, Math.PI * 2);
+  pen.fill();
+  const entry = await addImage("practice.png", canvas);
+  selectItem(state.items.indexOf(entry));
+});
+
+for (const target of [document.body, stage]) {
+  target.addEventListener("dragover", (event) => { event.preventDefault(); stage.classList.add("drop"); });
+  target.addEventListener("dragleave", () => stage.classList.remove("drop"));
+  target.addEventListener("drop", (event) => {
+    event.preventDefault();
+    stage.classList.remove("drop");
+    if (event.dataTransfer?.files?.length) addFiles(event.dataTransfer.files);
+  });
+}
+
+new ResizeObserver(resizeView).observe(stage);
+resizeView();
+</script>
+</body>
+</html>

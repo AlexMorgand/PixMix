@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -41,7 +42,12 @@ struct Args {
     bool exact_mask = false;
     bool correct_contour = true;
     float tau_s = -1.f;
+    float tau_a = -1.f;
+    float locality = -1.f;
+    int patch_size = 0;
+    bool structural_candidate = false;
     std::string debug_output;
+    std::string scales;
 };
 
 void print_usage() {
@@ -52,7 +58,8 @@ void print_usage() {
         << "  pixmix --still IMAGE --polygon x,y,x,y,... --output OUT [--max-side N] [--dilate N]\n"
         << "  pixmix --video PATH --polygon x,y,x,y,... --output OUT [--rotate 90] [--max-side N] [--dilate N]\n"
         << "         [--debug-output DEBUG.mp4] [--no-correct] [--exact] [--max-frames N]\n"
-        << "  tuning: --alpha A --tau-s T --video-passes N --search-radius R\n"
+        << "  tuning: --alpha A --tau-s T --tau-a T --locality T --patch-size ODD --video-passes N --search-radius R --no-structure\n"
+        << "  --scales DIR writes each pyramid level, coarse to fine\n"
         << "  pixmix --benchmark [--bench-hole PIXELS] [--bench-frames N]\n\n"
         << "Selection: click the frozen frame, z undo, c clear, Enter start, q quit.\n"
         << "Running: q quit, r reselect, d mask overlay, p pause.\n";
@@ -110,8 +117,18 @@ Args parse_args(int argc, char** argv) {
             args.exact_mask = true;
         } else if (key == "--tau-s") {
             args.tau_s = std::stof(need("--tau-s"));
+        } else if (key == "--tau-a") {
+            args.tau_a = std::stof(need("--tau-a"));
+        } else if (key == "--locality") {
+            args.locality = std::stof(need("--locality"));
+        } else if (key == "--patch-size") {
+            args.patch_size = std::stoi(need("--patch-size"));
+        } else if (key == "--no-structure") {
+            args.structural_candidate = false;
         } else if (key == "--debug-output") {
             args.debug_output = need("--debug-output");
+        } else if (key == "--scales") {
+            args.scales = need("--scales");
         } else if (key == "--no-correct") {
             args.correct_contour = false;
         } else if (key == "--help" || key == "-h") {
@@ -128,6 +145,7 @@ pixmix::PixMixConfig make_config(const Args& args) {
     pixmix::PixMixConfig config;
     config.seed = args.seed;
     config.hole_margin = std::max(0, args.dilate);
+    config.structural_candidate = args.structural_candidate;
     if (args.alpha >= 0.f) {
         config.alpha = args.alpha;
     }
@@ -139,6 +157,18 @@ pixmix::PixMixConfig make_config(const Args& args) {
     }
     if (args.tau_s > 0.f) {
         config.tau_s = args.tau_s;
+    }
+    if (args.tau_a > 0.f) {
+        config.tau_a = args.tau_a;
+    }
+    if (args.locality >= 0.f) {
+        config.source_locality = args.locality;
+    }
+    if (args.patch_size > 0) {
+        if (args.patch_size % 2 == 0) {
+            throw std::runtime_error("--patch-size must be odd");
+        }
+        config.patch_radius = args.patch_size / 2;
     }
     config.correct_contour = args.correct_contour;
     return config;
@@ -508,6 +538,70 @@ int run_polygon_video(const Args& args) {
     return index == 0 ? 1 : 0;
 }
 
+void write_scales(const std::string& directory, const std::vector<pixmix::ScaleView>& scales) {
+    if (scales.empty()) {
+        return;
+    }
+    std::filesystem::create_directories(directory);
+    const int cell_h = 220;
+    std::vector<cv::Mat> before_row;
+    std::vector<cv::Mat> after_row;
+    std::vector<cv::Mat> block_row;
+    int sheet_w = 0;
+    for (size_t index = 0; index < scales.size(); ++index) {
+        const pixmix::ScaleView& scale = scales[index];
+        cv::imwrite(directory + "/before_" + std::to_string(index) + ".png", scale.before);
+        cv::imwrite(directory + "/after_" + std::to_string(index) + ".png", scale.after);
+        if (!scale.blocks.empty()) {
+            cv::imwrite(directory + "/blocks_" + std::to_string(index) + ".png", scale.blocks);
+        }
+        auto present = [&](const cv::Mat& image, const std::string& caption) {
+            cv::Mat cell;
+            const int cell_w = std::max(1, image.cols * cell_h / std::max(1, image.rows));
+            cv::resize(image, cell, cv::Size(cell_w, cell_h), 0, 0, cv::INTER_NEAREST);
+            cv::rectangle(cell, cv::Rect(0, 0, std::min(cell.cols, 280), 28), cv::Scalar(0, 0, 0), cv::FILLED);
+            cv::putText(cell, caption, cv::Point(6, 20), cv::FONT_HERSHEY_SIMPLEX, 0.55, cv::Scalar(0, 255, 255), 1,
+                        cv::LINE_AA);
+            return cell;
+        };
+        const std::string size = std::to_string(scale.after.cols) + "x" + std::to_string(scale.after.rows);
+        before_row.push_back(present(scale.before, "in " + size));
+        after_row.push_back(present(scale.after, "out " + size));
+        if (!scale.blocks.empty()) {
+            int gray = 0;
+            int hole = 0;
+            for (int y = 0; y < scale.blocks.rows; ++y) {
+                const cv::Vec3b* row = scale.blocks.ptr<cv::Vec3b>(y);
+                for (int x = 0; x < scale.blocks.cols; ++x) {
+                    if (row[x] == cv::Vec3b(255, 255, 255)) {
+                        continue;
+                    }
+                    ++hole;
+                    if (row[x] != cv::Vec3b(0, 0, 0)) {
+                        ++gray;
+                    }
+                }
+            }
+            const int percent = hole > 0 ? (100 * gray) / hole : 0;
+            block_row.push_back(present(scale.blocks, "blocks " + std::to_string(percent) + "% agree"));
+        }
+        sheet_w += before_row.back().cols + 6;
+    }
+    const int rows = block_row.empty() ? 2 : 3;
+    cv::Mat sheet(cell_h * rows + 6 * (rows - 1), std::max(1, sheet_w), CV_8UC3, cv::Scalar(30, 30, 30));
+    int x = 0;
+    for (size_t index = 0; index < before_row.size(); ++index) {
+        before_row[index].copyTo(sheet(cv::Rect(x, 0, before_row[index].cols, cell_h)));
+        after_row[index].copyTo(sheet(cv::Rect(x, cell_h + 6, after_row[index].cols, cell_h)));
+        if (index < block_row.size()) {
+            block_row[index].copyTo(sheet(cv::Rect(x, cell_h * 2 + 12, block_row[index].cols, cell_h)));
+        }
+        x += before_row[index].cols + 6;
+    }
+    cv::imwrite(directory + "/scales.png", sheet);
+    std::cout << "wrote " << directory << "/scales.png levels=" << scales.size() << "\n";
+}
+
 int run_still(const Args& args) {
     if (args.mask.empty()) {
         std::cerr << "--still requires --mask\n";
@@ -525,11 +619,17 @@ int run_still(const Args& args) {
         std::cerr << "inpainting failed\n";
         return 1;
     }
-    const std::string output = "pixmix_still.png";
-    cv::imwrite(output, first.image);
+    const std::string output = args.output.empty() ? std::string("pixmix_still.png") : args.output;
+    if (!cv::imwrite(output, first.image)) {
+        std::cerr << "could not write " << output << "\n";
+        return 1;
+    }
     std::cout << "wrote " << output << " hole=" << first.stats.hole_pixels
               << " inpaint_ms=" << first.stats.inpaint_ms << "\n";
-    if (std::getenv("DISPLAY") != nullptr) {
+    if (!args.scales.empty()) {
+        write_scales(args.scales, pipeline.scales());
+    }
+    if (args.output.empty() && std::getenv("DISPLAY") != nullptr) {
         cv::imshow("PixMix", first.image);
         cv::waitKey(0);
     }
